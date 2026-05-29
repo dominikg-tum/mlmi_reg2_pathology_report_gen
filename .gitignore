@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local data assets (flowcharts, sample slides — canonical data on cluster)
+data/
+
+# Large PDF references (keep locally; markdown docs are tracked)
+docs/*.pdf

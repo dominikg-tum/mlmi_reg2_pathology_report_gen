@@ -1,0 +1,6 @@
+# Reference copy of cluster base deps — canonical file lives at:
+# /mnt/projects/mlmi/reg2/requirements_clean.txt
+#
+# Install on cluster:
+#   pip install -r /mnt/projects/mlmi/reg2/requirements_clean.txt
+#   pip install -r /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/requirements.txt

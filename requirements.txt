@@ -1,0 +1,10 @@
+# Repo-specific dependencies (install inside dominik_mlmi on cluster)
+openslide-python
+opencv-python-headless
+tqdm
+pyyaml
+pandas
+openpyxl
+openai
+numpy
+pillow

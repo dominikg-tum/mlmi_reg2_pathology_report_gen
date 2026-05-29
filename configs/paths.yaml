@@ -1,0 +1,29 @@
+# Cluster path constants — adjust username / container export date as needed.
+
+cluster:
+  project_root: /mnt/projects/mlmi/reg2
+  data_dir: /mnt/projects/mlmi/reg2/TUMUntera
+  labels_xlsx: /mnt/projects/mlmi/reg2/case_reports_to_korea_collaborators.xlsx
+  models_dir: /mnt/projects/mlmi/reg2/models
+  containers_dir: /mnt/projects/mlmi/reg2/containers
+  repos_dir: /mnt/projects/mlmi/reg2/repos
+  scripts_dir: /mnt/projects/mlmi/reg2/scripts
+
+user:
+  name: dominik
+  work_dir: /mnt/projects/mlmi/reg2/dominik
+  logs_dir: /mnt/projects/mlmi/reg2/dominik/logs
+  enroot_name: dominik_mlmi
+  # Update after each export; used by SLURM scripts
+  container_sqsh: /mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh
+
+repo:
+  name: mlmi_reg2_pathology_report_gen
+  path: /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+
+qwen:
+  # Confirm model path and serving port with teammates
+  model_path: /mnt/projects/mlmi/reg2/models/Qwen2.5-7B-Instruct
+  api_base_url: http://localhost:8000/v1
+  api_key: token-abc123
+  model_name: Qwen2.5-7B-Instruct

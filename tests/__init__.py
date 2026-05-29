@@ -1,0 +1,1 @@
+"""Tests for mlmi_reg2_pathology_report_gen."""
