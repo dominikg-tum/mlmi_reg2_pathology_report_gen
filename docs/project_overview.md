@@ -1,6 +1,7 @@
 # Interactive Diagnostic Reasoning for Pathology Report Generation
+
 **TUM MLMI Practical Course — Summer 2026**  
-Contact: Dr. Han Li · tum_han.li@tum.de · REG² Challenge-Oriented Project
+Contact: Dr. Han Li · [tum_han.li@tum.de](mailto:tum_han.li@tum.de) · REG² Challenge-Oriented Project
 
 ---
 
@@ -11,6 +12,7 @@ Pathologists don't generate reports in one shot — they reason **step by step**
 **Our goal:** build a system that walks a structured diagnostic reasoning tree from WSI input, producing both a **reasoning chain** and a **final pathology report**.
 
 **Both outputs are required and separately evaluated:**
+
 - Reasoning chain → evaluated with Binary Path Validity, Edge-F1, MESS
 - Final pathology report → evaluated with ROUGE-L, BLEU-4, clinical accuracy
 
@@ -18,11 +20,13 @@ Pathologists don't generate reports in one shot — they reason **step by step**
 
 ## 2. What We Have
 
-| Data | Description |
-|---|---|
-| `.svs` files | Gigapixel H&E WSIs, uterine pathology (Uteria dataset) |
-| `excel` | `slide_id` · `case_class (A–E)` · `english_report` |
+
+| Data                  | Description                                             |
+| --------------------- | ------------------------------------------------------- |
+| `.svs` files          | Gigapixel H&E WSIs, uterine pathology (Uteria dataset)  |
+| `excel`               | `slide_id` · `case_class (A–E)` · `english_report`      |
 | **Supervisor's tree** | Pre-built diagnostic reasoning graph (our WP3 shortcut) |
+
 
 **case_class A–E** likely encodes report complexity/completeness (A = richest, E = sparse). Confirm with Dr. Han Li — determines which cases are clean enough for training.
 
@@ -54,18 +58,20 @@ The tree gives us WHAT to ask and in WHAT order. The `english_report` gives us W
 
 ## 4. Work Packages
 
-| WP | Task | Who |
-|---|---|---|
-| WP1 | Understand data: explore WSIs, reports, tree | Both |
-| WP2 | Pipeline: patch extraction + TITAN encoding | Both |
-| WP3 | Q→A extraction from reports (tree given by supervisor) | Both |
-| WP4 | Zero-shot baselines + evaluation setup | Both |
-| WP5 | **G1:** Step-wise fine-tuning · **G2:** Agent framework | Split |
-| WP6 | Compare results, intermediate presentation | Both |
-| WP7 | Refine models | Both |
-| WP8 | Integrate G1 + G2 | Both |
-| WP9 | Benchmark on test set | Both |
-| WP10 | Final documentation & presentation | Both |
+
+| WP   | Task                                                    | Who   |
+| ---- | ------------------------------------------------------- | ----- |
+| WP1  | Understand data: explore WSIs, reports, tree            | Both  |
+| WP2  | Pipeline: patch extraction + TITAN encoding             | Both  |
+| WP3  | Q→A extraction from reports (tree given by supervisor)  | Both  |
+| WP4  | Zero-shot baselines + evaluation setup                  | Both  |
+| WP5  | **G1:** Step-wise fine-tuning · **G2:** Agent framework | Split |
+| WP6  | Compare results, intermediate presentation              | Both  |
+| WP7  | Refine models                                           | Both  |
+| WP8  | Integrate G1 + G2                                       | Both  |
+| WP9  | Benchmark on test set                                   | Both  |
+| WP10 | Final documentation & presentation                      | Both  |
+
 
 ---
 
@@ -142,6 +148,8 @@ flowchart TD
     style AGENT fill:#fdf2e9,stroke:#e67e22
 ```
 
+
+
 ---
 
 ## 7. Step-by-Step: Concrete Implementation
@@ -173,15 +181,18 @@ Feed each `english_report` + all tree questions to an LLM (Claude/GPT-4 API). It
 
 Your reports map cleanly to tree nodes:
 
-| Report layer | Tree nodes |
-|---|---|
-| Macroscopy | Specimen type, size, fragments |
-| Microscopy | Architecture, invasion, nuclear grade, mitoses |
-| IHC findings | p53, WT1, p16, MMR proteins |
-| Molecular | MSI status |
-| Final diagnosis | Leaf node → report target |
+
+| Report layer    | Tree nodes                                     |
+| --------------- | ---------------------------------------------- |
+| Macroscopy      | Specimen type, size, fragments                 |
+| Microscopy      | Architecture, invasion, nuclear grade, mitoses |
+| IHC findings    | p53, WT1, p16, MMR proteins                    |
+| Molecular       | MSI status                                     |
+| Final diagnosis | Leaf node → report target                      |
+
 
 **Example:**
+
 ```
 Tree Q: "Is there myometrial invasion?"
 Report: "...with deep myometrial invasion..."
@@ -197,6 +208,7 @@ Report: (not mentioned)
 ```
 
 **Output per case:**
+
 ```json
 {
   "slide_id": "1b2d0c53.svs",
@@ -222,18 +234,19 @@ Use class A + B cases for training — richest reports, fewest "not mentioned" a
 
 Run before any fine-tuning. These are your "before" numbers.
 
-| Baseline | Setup | Metrics |
-|---|---|---|
-| B1: Direct generation | Mean-pool all patches → VLM → report, no reasoning | ROUGE-L, BLEU-4 |
-| B2: Zero-shot CoT | Tree questions one-by-one, off-the-shelf VLM, no fine-tuning | Edge-F1, MESS |
-| B3: GPT-4V | API, expensive but upper bound | All |
+
+| Baseline              | Setup                                                        | Metrics         |
+| --------------------- | ------------------------------------------------------------ | --------------- |
+| B1: Direct generation | Mean-pool all patches → VLM → report, no reasoning           | ROUGE-L, BLEU-4 |
+| B2: Zero-shot CoT     | Tree questions one-by-one, off-the-shelf VLM, no fine-tuning | Edge-F1, MESS   |
+| B3: GPT-4V            | API, expensive but upper bound                               | All             |
+
 
 ---
 
 ### 7.4 Context-Aware Retriever (Group 2 — built first)
 
 NOTE that this is a) hard and b) there are multiple approaches, from which we need to adapt one. 
-
 
 #### **My current main idea 2: Text-guided cosine retrieval - How it works:**
 
@@ -321,6 +334,7 @@ Text target:    "Yes, deep myometrial invasion"
 Unrolling a 6-step chain → 6 Q→A samples + 1 report generation sample = **7 training samples per case**.
 
 **Fine-tuning setup:**
+
 - Base model: **some VLM - we need to choose one which is LoRA fine-tunable. A key finding has been "Generalists (fine-tuned) > Specialists"!** Some model choices for both generalists(QWEN2-5, QWEN3, InternVL2, LLaVA-1.5) and Specialists (LLaVA-Med, PathChat, ....)
 - Method: **LoRA** — updates ~0.1% of parameters, fits on 2× A100
 - Loss: cross-entropy on target tokens only
@@ -392,13 +406,15 @@ G1 = reliable answering. G2 = intelligent looking + self-correction. Retriever =
 
 ## 8. Evaluation Metrics (REG²)
 
-| Metric | Measures | Notes |
-|---|---|---|
-| **Binary Path Validity** | Exact match of predicted vs. ground-truth path | 1 or 0, strict |
-| **Edge-F1** | Partial path agreement (precision + recall over edges) | Graded credit |
-| **MESS** | Semantic similarity of answers via biomedical embeddings | Clinical meaning |
-| Visual Grounding Score | Background patches correctly called "not informative" | Sanity check |
-| Counterfactual Score | Correct update of conclusions under hypothetical changes | Logic check |
+
+| Metric                   | Measures                                                 | Notes            |
+| ------------------------ | -------------------------------------------------------- | ---------------- |
+| **Binary Path Validity** | Exact match of predicted vs. ground-truth path           | 1 or 0, strict   |
+| **Edge-F1**              | Partial path agreement (precision + recall over edges)   | Graded credit    |
+| **MESS**                 | Semantic similarity of answers via biomedical embeddings | Clinical meaning |
+| Visual Grounding Score   | Background patches correctly called "not informative"    | Sanity check     |
+| Counterfactual Score     | Correct update of conclusions under hypothetical changes | Logic check      |
+
 
 ---
 
@@ -435,12 +451,24 @@ FINAL    Documentation + presentation (WP10)
 
 ## 10. Key Technical Decisions
 
-| Decision | Choice | Reason |
-|---|---|---|
-| **Patch encoder** | TITAN (frozen) | SOTA pathology VL encoder, text+image alignment |
-| **Retrieval Method** | TITAN cosine similarity, context-aware query | Train/test consistent, no extra training needed |
-| **VLM Base Model to be LoRA fine-tuned** | **A key finding has been "Generalists (fine-tuned) > Specialists"!** Some model choices for both generalists(QWEN2-5, QWEN3, InternVL2, LLaVA-1.5) and Specialists (LLaVA-Med, PathChat, ....) | Feasible on 2× GPU, medical domain base | 
-| **Q→A extraction**| LLM API (Claude/GPT-4), one-time , check costs vs self-hosted| Saves weeks of manual annotation |
-| **Build order**| Retriever first → fine-tuning uses it | Eliminates train/test distribution mismatch |
-| **Two-slide cases** | Pool embeddings | Simpler — confirm with supervisor |
-| **Training filter** | Class A + B only (tentative) | Richest reports → cleanest Q→A chains |
+
+| Decision                                 | Choice                                                                                                                                                                                         | Reason                                          |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **Patch encoder**                        | TITAN (frozen)                                                                                                                                                                                 | SOTA pathology VL encoder, text+image alignment |
+| **Retrieval Method**                     | TITAN cosine similarity, context-aware query                                                                                                                                                   | Train/test consistent, no extra training needed |
+| **VLM Base Model to be LoRA fine-tuned** | **A key finding has been "Generalists (fine-tuned) > Specialists"!** Some model choices for both generalists(QWEN2-5, QWEN3, InternVL2, LLaVA-1.5) and Specialists (LLaVA-Med, PathChat, ....) | Feasible on 2× GPU, medical domain base         |
+| **Q→A extraction**                       | LLM API (Claude/GPT-4), one-time , check costs vs self-hosted                                                                                                                                  | Saves weeks of manual annotation                |
+| **Build order**                          | Retriever first → fine-tuning uses it                                                                                                                                                          | Eliminates train/test distribution mismatch     |
+| **Two-slide cases**                      | Pool embeddings                                                                                                                                                                                | Simpler — confirm with supervisor               |
+| **Training filter**                      | Class A + B only (tentative)                                                                                                                                                                   | Richest reports → cleanest Q→A chains           |
+
+
+## **Recommended first steps (in order)**
+
+1. **WP1** — run `notebooks/explore_wsi.ipynb` (`.svs` inventory, `case_class` distribution, report-length-per-class). Confirms which classes are training-clean.
+2. **Encode the graph** — translate Han's tree into `diagnostic_graph.py` nodes/edges; `validate_graph()` keeps it consistent. This is your highest-leverage artifact.
+3. **WP3** — run reports through Qwen (`qa_extractor.py`) to get per-case path + answers; validate ~20–30 cases by hand against the graph. This both labels data and stress-tests graph coverage.
+4. **WP2** — patch extraction + TITAN embeddings cached to disk; wire `TitanRetriever`.
+5. **WP4** — run `baselines/zero_shot.py` through the controller. A working untrained agent = your "before" numbers and proof the whole loop runs *before* any training.
+6. **WP5** — LoRA fine-tune; drop in a `FineTunedBackend`.
+
