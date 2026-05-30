@@ -95,9 +95,13 @@ memory — all from text you already have, *before* tackling the hard vision pro
 
 The word *graph* means two things here. Keep them separate:
 
-1. **Control-flow graph (the diagnostic tree).** Fixed, curated, small (tens of nodes). Nodes =
-   questions, edges = `answer → next_question`. A **state machine** stored as JSON. Traversal
-   is deterministic and needs no RAG. (Meeting task #3 = encode this.)
+1. **Control-flow graph (the diagnostic tree).** Fixed, curated, small. This **is** Han's
+   `data/Uterus pathology diagnostic flowchart.png` — a feature ontology in three tiers
+   (**Global features** → organ/specimen/procedure; **Local features** → compartment → finding
+   → microscopic pattern → cellular features; **Integration** → synthesis → diagnosis →
+   reporting). Nodes = questions, edges = reasoning order. A **state machine** stored as JSON.
+   Traversal is deterministic and needs no RAG. (Meeting task #3 = encode this — **done**, see
+   `data/diagnostic_graph.json` and §8.)
 
 2. **Agent memory (the RAG / memory structure).** Two kinds of content:
    - **Episodic** — the `(question, answer)` facts the agent has produced *so far on the
@@ -228,25 +232,32 @@ stretch goal. Keep the text-only oracle around for debugging.
 
 ## 8. JSON schemas
 
-**Graph (control-flow state machine):**
+**Graph (control-flow state machine).** A first faithful transcription of Han's flowchart
+already exists at **`data/diagnostic_graph.json`** (22 nodes, 24 edges, three tiers). Shape:
 
 ```json
 {
-  "root": "q_organ",
+  "root": "organ",
+  "tiers": ["global_features", "local_features", "integration"],
   "nodes": {
-    "q_organ":  { "question": "What is the organ?", "type": "categorical" },
-    "q_abnorm": { "question": "Is there any abnormality present?", "type": "boolean" },
-    "q_ndx":    { "question": "What is the number of diagnoses to include?", "type": "integer" },
-    "q_report": { "question": "What is the final pathology report?", "type": "free_text", "terminal": true }
+    "organ":        { "label": "Organ", "tier": "global_features", "type": "slot", "question": "What is the organ?", "expected": "Uterus" },
+    "compartment":  { "label": "Compartment", "tier": "local_features", "type": "select",
+                      "question": "Which uterine compartment(s) are represented?",
+                      "options": ["endometrium", "myometrium", "junctional_zone", "serosa_perimetrium", "uterine_mass_lesion"] },
+    "reporting":    { "label": "Reporting", "tier": "integration", "type": "terminal", "terminal": true, "question": "What is the final pathology report?" }
   },
   "edges": [
-    { "from": "q_organ",  "on_answer": "*",   "to": "q_abnorm" },
-    { "from": "q_abnorm", "on_answer": "no",  "to": "q_report" },
-    { "from": "q_abnorm", "on_answer": "yes", "to": "q_ndx" },
-    { "from": "q_ndx",    "on_answer": "*",   "to": "q_report" }
+    { "from": "organ", "to": "specimen_type", "type": "sequence" },
+    { "from": "compartment", "to": "myometrium", "type": "branch", "on_answer": "myometrium" },
+    { "from": "cellular_features", "to": "synthesis", "type": "contributes_to" }
   ]
 }
 ```
+
+Edge `type` is `sequence` (ordered step), `branch` (choose compartment via `on_answer`),
+`assesses` (compartment → its possible findings), or `contributes_to` (feeds synthesis). The
+answer-conditioned routing is a **draft to refine with Han** — the flowchart is more a feature
+ontology than a strict router.
 
 **Per-case chain (training label, built from the report in WP3):**
 
@@ -283,7 +294,7 @@ stretch goal. Keep the text-only oracle around for debugging.
 
 1. **Visual input granularity** — is a **global TITAN slide embedding (Level 0)** acceptable for the core task, with patch navigation (Level 2) as a stretch goal? Or does he expect patch-level reasoning from the start?
 2. **Memory scope** — should the RAG/memory be only **episodic** (the agent's own answers on the current case), or also a **semantic knowledge base built from training reports** retrieved at inference? This decides whether GraphRAG/HippoRAG/ReMem are central or optional.
-3. **Is the diagnostic graph fixed/provided**, or do we (partly) derive it? Where is Han's tree (the `Uterus pathology diagnostic flowchart.png`)?
+3. **Graph fidelity** — the graph is `data/Uterus pathology diagnostic flowchart.png`, now encoded in `data/diagnostic_graph.json`. Confirm: (a) is the **answer-conditioned routing** ours to define, and (b) for the `*_finding` / `microscopic_pattern` / `cellular_features` nodes, do we treat them as single-select, multi-select, or free text? The flowchart shows features, not which answer leads where.
 4. **Group split** — are we Group 1 (step-wise reasoning) or Group 2 (interactive memory), or covering both?
 5. **Correction/update (Group 2)** — what "feedback" revises predictions at inference? Confidence-based self-revision, consistency rules, or a human/tutor signal?
 6. **Two-slide cases** — pool embeddings, or treat cervix/corpus slides separately? (Many cases have 2–3 `.svs`.)
