@@ -1,5 +1,5 @@
-# Offline WSI caches — set cache_root on cluster (under ~/N/.../reg2_cache)
-cache_root: null
+# Offline WSI caches — matches cluster user.cache_dir in configs/paths.yaml
+cache_root: /mnt/projects/mlmi/reg2/dominik/cache
 
 thumbnail:
   max_edge_px: 1024

@@ -61,6 +61,6 @@ python scripts/data/build_manifest.py --example-only
 
 ## Cluster
 
-`/mnt/projects/mlmi/reg2` — see [cluster_setup.md](docs/cluster_setup.md).
+`/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen` — see [cluster_setup.md](docs/cluster_setup.md).
 
-Set `configs/vision.yaml` → `cache_root` for offline thumbnails and patch embeddings.
+Paths, models, and containers: `configs/paths.yaml`. Offline WSI cache: `configs/vision.yaml` (`cache_root` → `dominik/cache` on cluster).

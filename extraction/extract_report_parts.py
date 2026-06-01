@@ -130,7 +130,9 @@ Pathology report:
 def main() -> None:
     cfg = load_config()
     input_xlsx = Path(cfg["cluster"]["labels_xlsx"])
-    output_json = REPO_ROOT / "data" / "report_parts_extracted.json"
+    extraction_cfg = cfg.get("extraction") or {}
+    output_raw = extraction_cfg.get("report_parts_json")
+    output_json = Path(output_raw) if output_raw else REPO_ROOT / "data" / "report_parts_extracted.json"
     qwen = cfg["qwen"]
     client = OpenAI(base_url=qwen["api_base_url"], api_key=qwen["api_key"])
     model = qwen["model_name"]

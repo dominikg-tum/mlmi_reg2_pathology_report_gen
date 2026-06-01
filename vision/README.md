@@ -14,7 +14,7 @@ python scripts/vision/encode_patches_offline.py   # sbatch on cluster
 python -m baselines.run_agent --visual patch_retrieve --retriever titan_cosine
 ```
 
-Cache layout under `vision.yaml` → `cache_root/{slide_id}/thumbnail.png`, `embeddings_high.pt`, etc.
+Cache layout: `configs/vision.yaml` → `cache_root` (cluster default: `dominik/cache` via `paths.yaml`) → `{slide_id}/thumbnail.png`, `embeddings_high.pt`, etc.
 
 ## MMNavAgent
 

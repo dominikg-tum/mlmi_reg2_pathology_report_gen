@@ -11,13 +11,13 @@
 
 set -euo pipefail
 
-mkdir -p /mnt/projects/mlmi/reg2/dominik/logs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=load_paths.sh
+source "${SCRIPT_DIR}/load_paths.sh"
+load_cluster_paths
 
-REPO=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
-# Update CONTAINER after exporting dominik_mlmi (yourname_YYYYMMDD_base.sqsh)
-CONTAINER=/mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh
+mkdir -p "${LOGS_DIR}"
 
-# Execute the WP1 exploration notebook headlessly (writes outputs back in-place).
 enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   "${CONTAINER}" \
   jupyter nbconvert --to notebook --execute --inplace \

@@ -15,19 +15,24 @@ ls /mnt/projects/mlmi/reg2
 | Path | Contents |
 |---|---|
 | `TUMUntera/` | WSI dataset (`.svs` files) |
-| `containers/` | Pre-built `.sqsh` container images (`graphrag_*` = newest team base) |
-| `repos/` | Git repositories (clone yours here) |
-| `models/` | Locally deployed VLMs (Qwen lives here) |
+| `containers/` | Pre-built `.sqsh` images (`qwen25_graphrag.sqsh` = GraphRAG team base) |
+| `repos/` | Git repositories — **clone this project here** |
+| `reg2_repo/` | Legacy folder — **do not** put `mlmi_reg2_pathology_report_gen` here |
+| `models/` | Locally deployed VLMs (Qwen3-VL, InternVL, MedGemma, …) |
 | `scripts/` | Shared helper scripts |
-| `case_reports_to_korea_collaborators.xlsx` | Labels (`slide_id`, `case_class`, `english_report`) |
+| `case_reports_to_korea_collaborators.xlsx` | Labels (`slide_ids`, `english_reports`, …) |
 | `requirements.txt` / `requirements_clean.txt` | Dependencies to install inside containers |
-| `dominik/` | Your personal working directory (create once, `chmod 777`) |
+| `dominik/` | Personal logs, cache, embeddings (`chmod 777`) |
 
 This repository should be cloned to:
 
 ```text
 /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 ```
+
+Team scripts at the project root (e.g. `extract_report_parts.py`, `report_parts_extracted.json`)
+are older copies; prefer `extraction/` in the repo and outputs under `data/` (see
+`configs/paths.yaml` → `extraction.report_parts_json`).
 
 ---
 
@@ -47,9 +52,9 @@ The cluster uses [enroot](https://github.com/NVIDIA/enroot) for containerized en
 ### 3.1 Starting from a team base image (first time)
 
 ```bash
-# Import and create from the newest team container (graphrag = latest)
-enroot import -- /mnt/projects/mlmi/reg2/containers/graphrag_latest.sqsh
-enroot create --name my_env graphrag_latest.sqsh
+# Import and create from the team GraphRAG base (filename on disk: qwen25_graphrag.sqsh)
+enroot import -- /mnt/projects/mlmi/reg2/containers/qwen25_graphrag.sqsh
+enroot create --name my_env qwen25_graphrag.sqsh
 enroot start my_env
 ```
 
@@ -119,9 +124,11 @@ srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
 ### 4.2 Create your working directory
 
 ```bash
-mkdir -p /mnt/projects/mlmi/reg2/dominik/logs
+mkdir -p /mnt/projects/mlmi/reg2/dominik/{logs,cache,embeddings}
 chmod 777 /mnt/projects/mlmi/reg2/dominik
 ```
+
+Offline WSI caches use `dominik/cache` — see `configs/vision.yaml` (`cache_root`).
 
 ---
 
@@ -307,24 +314,28 @@ grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 
 | Asset | Path | Role |
 |---|---|---|
-| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | MVP VLM backbone (already used in `extract_report_parts.py`) |
-| **Qwen2.5-7B-Instruct** | `models/Qwen2.5-7B-Instruct` | Smaller text model; default in `start_qwen_server.sh` |
+| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | MVP VLM — default in `configs/paths.yaml` and `start_qwen_server.sh` |
 | **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Larger upper-bound baseline |
-| **InternVL3_5-8B / 14B** | `models/InternVL3_5-*` | LoRA fine-tune candidates |
+| **InternVL3_5-8B / 14B** | `models/InternVL3_5-8B`, `InternVL3_5-14B` | LoRA fine-tune candidates |
+| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | Small medical VLM baseline |
 | **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
 | **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
+
+All paths are listed in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
 
 Repo scripts live under `scripts/cluster/`:
 
 ```text
 scripts/cluster/
+├── load_paths.sh           # source of truth reader for paths.yaml
 ├── start_qwen_server.sh    # vLLM OpenAI-compatible API (long-running)
 └── explore_data.sh         # WP1 notebook batch job (one-shot)
 ```
 
-When adding new jobs, copy one of these as a template — same `#SBATCH` headers,
-`enroot start --root --rw --mount /mnt:/mnt`, and log paths under
-`/mnt/projects/mlmi/reg2/dominik/logs/`.
+SLURM scripts `source load_paths.sh` so container and model paths stay in sync with
+`configs/paths.yaml`. When adding jobs, copy one of these as a template — same `#SBATCH`
+headers, `load_cluster_paths`, `enroot start --root --rw --mount /mnt:/mnt`, and logs under
+`dominik/logs/`.
 
 ### 7.2 Qwen via vLLM (generative VLM / text)
 
@@ -349,7 +360,7 @@ From the repo root (on head — `sbatch` is lightweight):
 ```bash
 cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 
-# Edit MODEL path in the script if you want Qwen3-VL-8B instead of Qwen2.5-7B
+# Model + container come from configs/paths.yaml (qwen.*, user.container_sqsh)
 sbatch scripts/cluster/start_qwen_server.sh
 
 squeue
@@ -357,9 +368,9 @@ tail -f /mnt/projects/mlmi/reg2/dominik/logs/qwen_server_<job-id>.out
 # Wait for: "Uvicorn running on http://0.0.0.0:8000"
 ```
 
-The script (`scripts/cluster/start_qwen_server.sh`) requests 2 GPUs and 60G RAM.
-For vision models (Qwen3-VL), update `MODEL=` to the full path under `models/`
-and confirm GPU memory is sufficient.
+The script requests 2 GPUs and 60G RAM (tune in the script for 30B). To switch models,
+edit `qwen.model_path` and `qwen.model_name` in `configs/paths.yaml` (e.g. to
+`models.qwen3_vl_30b`), then re-submit.
 
 #### Start interactively (debugging)
 
@@ -383,7 +394,7 @@ Point `configs/paths.yaml` at the running endpoint, then:
 # Smoke test (reads api_base_url + model_name from paths.yaml)
 python extraction/qa_extractor.py
 
-# Full report-parts extraction (batch over the xlsx)
+# Full report-parts extraction (batch over the xlsx → data/report_parts_extracted.json)
 python extraction/extract_report_parts.py
 ```
 
@@ -464,7 +475,8 @@ Same general pattern applies:
 | 5 | Expose as an `AnswerBackend` in `agent/backends.py` or `baselines/run_agent.py` |
 
 For HuggingFace-style models, the team container already has PyTorch + transformers.
-For vLLM-served models, copy `start_qwen_server.sh` and change `MODEL=` + GPU count.
+For vLLM-served models, copy `start_qwen_server.sh` and point `qwen.model_path` in
+`paths.yaml` at another entry under `models:` (+ adjust GPU count in the script).
 
 ### 7.5 SLURM script checklist (repo convention)
 
@@ -481,10 +493,10 @@ When adding `scripts/cluster/my_job.sh`:
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.err
 
 set -euo pipefail
-mkdir -p /mnt/projects/mlmi/reg2/dominik/logs
-
-REPO=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
-CONTAINER=/mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh  # or your export
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/load_paths.sh"
+load_cluster_paths
+mkdir -p "${LOGS_DIR}"
 
 enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   "${CONTAINER}" \
@@ -507,9 +519,8 @@ cat /mnt/projects/mlmi/reg2/dominik/logs/my_job_<job-id>.out
 Script: `scripts/cluster/explore_data.sh`
 
 ```bash
-# From head
-sbatch /mnt/projects/mlmi/reg2/dominik/explore_data.sh
-# or, from the repo:
+# From head — submit from the repo (paths from configs/paths.yaml)
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 sbatch scripts/cluster/explore_data.sh
 
 # Monitor
@@ -518,7 +529,9 @@ jobstats <job-id>
 cat /mnt/projects/mlmi/reg2/dominik/logs/explore_*.out
 ```
 
-The batch script runs `notebooks/explore_wsi.ipynb` headlessly via `jupyter nbconvert` inside `dominik_mlmi` (or your latest exported `.sqsh`).
+The batch script runs `notebooks/explore_wsi.ipynb` headlessly via `jupyter nbconvert`
+inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh` or your
+`user.personal_container_sqsh` after you switch it in `paths.yaml`).
 
 ---
 

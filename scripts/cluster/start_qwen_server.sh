@@ -9,13 +9,16 @@
 
 set -euo pipefail
 
-mkdir -p /mnt/projects/mlmi/reg2/dominik/logs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=load_paths.sh
+source "${SCRIPT_DIR}/load_paths.sh"
+load_cluster_paths
 
-CONTAINER=/mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh
-MODEL=/mnt/projects/mlmi/reg2/models/Qwen2.5-7B-Instruct
+mkdir -p "${LOGS_DIR}"
 
 enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   "${CONTAINER}" \
   python -m vllm.entrypoints.openai.api_server \
     --model "${MODEL}" \
+    --served-model-name "${MODEL_NAME}" \
     --port 8000
