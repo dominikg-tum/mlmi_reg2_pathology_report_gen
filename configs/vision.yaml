@@ -1,0 +1,22 @@
+# Offline WSI caches — set cache_root on cluster (under ~/N/.../reg2_cache)
+cache_root: null
+
+thumbnail:
+  max_edge_px: 1024
+  format: png
+
+magnification_bands:
+  low:
+    objective: 5x
+    patch_size: 256
+  medium:
+    objective: 10x
+    patch_size: 256
+  high:
+    objective: 20x
+    patch_size: 256
+
+defaults:
+  visual: thumbnail
+  retriever: none
+  navigator: graph_guided
