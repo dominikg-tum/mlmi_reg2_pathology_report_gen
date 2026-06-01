@@ -198,46 +198,308 @@ Add to **User Settings JSON** (`Ctrl+Shift+P` → *Preferences: Open User Settin
 }
 ```
 
----
+### 6.3 Cursor + GitHub cheat sheet
 
-## 7. Q&A Extraction with Local Qwen (WP3)
+Remote-SSH and GitHub use **two separate SSH connections**:
 
-No public API on the cluster — use the locally deployed Qwen model under `models/`.
+| Connection | Target | Purpose |
+|---|---|---|
+| Cursor Remote-SSH | `user@essen.garching.camp.cluster:PORT` | Edit code on a compute node |
+| Git over SSH | `git@github.com` | `git clone` / `pull` / `push` |
 
-```bash
-ls /mnt/projects/mlmi/reg2/models/
-ls /mnt/projects/mlmi/reg2/repos/
-grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh
+Remote-SSH does **not** authenticate you to GitHub. Git commands run in the Cursor
+terminal on the cluster and need their own GitHub credentials there.
+
+#### Option A — SSH agent forwarding (recommended)
+
+Reuse the SSH key already on your laptop. No key duplication inside enroot.
+
+**On your laptop** (`~/.ssh/config`):
+
+```sshconfig
+Host *.garching.camp.cluster
+  ForwardAgent yes
+  IdentityFile ~/.ssh/id_ed25519
 ```
 
-### Scenario A: Qwen served via vLLM (OpenAI-compatible API)
+Start the agent locally and add your key:
 
-See `src/wp3_qa_extraction/extract_qa.py` — point `base_url` at the local endpoint (check port with teammates):
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+```
+
+After connecting via Remote-SSH, verify inside the remote terminal:
+
+```bash
+ssh -T git@github.com
+# Hi YOUR_USERNAME! You've successfully authenticated...
+```
+
+Then use git normally:
+
+```bash
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+git pull
+git push
+```
+
+**Pros:** one key to manage; works across container restarts.  
+**Cons:** agent must be running on your laptop; forwarding may be disabled by cluster policy — test with `ssh -T git@github.com` on first connect.
+
+#### Option B — Key inside the enroot container
+
+Generate a dedicated key inside the container (see §5). Add the public key to
+GitHub → Settings → SSH Keys.
+
+**Pros:** works even if agent forwarding is blocked.  
+**Cons:** keys live in the container filesystem — they are lost unless you export
+the container to a new `.sqsh` (§3.4). Prefer storing keys in cluster home
+(`~/.ssh` on the compute node, outside enroot) if your workflow allows git outside
+the container.
+
+#### Option C — HTTPS + personal access token
+
+```bash
+git remote set-url origin https://github.com/YOUR_USERNAME/mlmi_reg2_pathology_report_gen.git
+git pull   # prompts for username + GitHub PAT once; cache with credential helper
+```
+
+Works everywhere but is less convenient for frequent pushes.
+
+#### Typical day-to-day loop (Cursor + GitHub)
+
+```bash
+# 1. From head — start SSH job for Cursor
+sbatch --partition=24g /mnt/general/examples/ssh.sh && sleep 15 && cat ssh.out
+
+# 2. In Cursor: Remote-SSH → connect → open repo folder
+
+# 3. On the remote terminal (inside enroot if needed):
+enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+git pull
+
+# 4. Edit in Cursor, then commit from the remote terminal:
+git add .
+git commit -m "WP3: extend qa_extractor"
+git push
+```
+
+Keep the repo on `/mnt/projects/mlmi/reg2/repos/` — not in `/tmp` or a
+container-only path — so it persists across sessions.
+
+---
+
+## 7. Running Models on the Cluster
+
+All model paths and API endpoints are centralized in
+[`configs/paths.yaml`](../configs/paths.yaml). Update that file once you confirm
+the live model name / port with teammates.
+
+### 7.1 What's deployed where
+
+```bash
+ls /mnt/projects/mlmi/reg2/models/          # local model weights
+ls /mnt/projects/mlmi/reg2/repos/         # TITAN, Patho-R1, quilt-llava, …
+grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
+```
+
+| Asset | Path | Role |
+|---|---|---|
+| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | MVP VLM backbone (already used in `extract_report_parts.py`) |
+| **Qwen2.5-7B-Instruct** | `models/Qwen2.5-7B-Instruct` | Smaller text model; default in `start_qwen_server.sh` |
+| **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Larger upper-bound baseline |
+| **InternVL3_5-8B / 14B** | `models/InternVL3_5-*` | LoRA fine-tune candidates |
+| **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
+| **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
+
+Repo scripts live under `scripts/cluster/`:
+
+```text
+scripts/cluster/
+├── start_qwen_server.sh    # vLLM OpenAI-compatible API (long-running)
+└── explore_data.sh         # WP1 notebook batch job (one-shot)
+```
+
+When adding new jobs, copy one of these as a template — same `#SBATCH` headers,
+`enroot start --root --rw --mount /mnt:/mnt`, and log paths under
+`/mnt/projects/mlmi/reg2/dominik/logs/`.
+
+### 7.2 Qwen via vLLM (generative VLM / text)
+
+The cluster has **no public LLM API**. Models are served locally with
+[vLLM](https://docs.vllm.ai/) inside enroot.
+
+#### Check if a server is already running
+
+Ask teammates first — a shared vLLM job may already be up. Otherwise:
+
+```bash
+squeue -u $USER
+# If you started one yourself:
+tail -f /mnt/projects/mlmi/reg2/dominik/logs/qwen_server_*.out
+curl -s http://localhost:8000/v1/models | python -m json.tool
+```
+
+#### Start your own vLLM server (batch)
+
+From the repo root (on head — `sbatch` is lightweight):
+
+```bash
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+
+# Edit MODEL path in the script if you want Qwen3-VL-8B instead of Qwen2.5-7B
+sbatch scripts/cluster/start_qwen_server.sh
+
+squeue
+tail -f /mnt/projects/mlmi/reg2/dominik/logs/qwen_server_<job-id>.out
+# Wait for: "Uvicorn running on http://0.0.0.0:8000"
+```
+
+The script (`scripts/cluster/start_qwen_server.sh`) requests 2 GPUs and 60G RAM.
+For vision models (Qwen3-VL), update `MODEL=` to the full path under `models/`
+and confirm GPU memory is sufficient.
+
+#### Start interactively (debugging)
+
+```bash
+srun --partition=24g --qos=students_normal --gres=gpu:2 --mem=60G --pty bash -l
+
+enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
+  /mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh \
+  python -m vllm.entrypoints.openai.api_server \
+    --model /mnt/projects/mlmi/reg2/models/Qwen3-VL-8B-Instruct \
+    --port 8000
+```
+
+Keep this terminal open — the server runs in the foreground.
+
+#### Call the server from repo code
+
+Point `configs/paths.yaml` at the running endpoint, then:
+
+```bash
+# Smoke test (reads api_base_url + model_name from paths.yaml)
+python extraction/qa_extractor.py
+
+# Full report-parts extraction (batch over the xlsx)
+python extraction/extract_report_parts.py
+```
+
+Python client pattern (same as `extraction/qa_extractor.py`):
 
 ```python
 import openai
 
 client = openai.OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="token-abc123",
+    base_url="http://localhost:8000/v1",   # or the compute node's hostname if cross-job
+    api_key="token-abc123",                # vLLM accepts any string
 )
-
 response = client.chat.completions.create(
-    model="Qwen2.5-72B-Instruct",  # confirm exact model name
-    messages=[...],
+    model="Qwen3-VL-8B-Instruct",          # must match --model served name
+    messages=[{"role": "user", "content": "..."}],
     temperature=0.0,
 )
 ```
 
-### Scenario B: Start a vLLM server yourself
+For the agent loop, see `baselines/zero_shot.py` — it uses the same
+OpenAI-compatible endpoint with guided decoding.
 
-Submit `scripts/cluster/start_qwen_server.sh`:
+> **Cross-job access:** if the vLLM server runs in a *different* SLURM job than
+> your client, replace `localhost` with the compute node's hostname (from
+> `hostname` inside the server job) and ensure both jobs landed on the same node,
+> or run client + server in the same `srun` session.
+
+### 7.3 TITAN (retrieval encoder — not a chat server)
+
+TITAN is a **frozen encoder**, not a generative API. You load weights from
+`repos/TITAN` and run batch encoding jobs — no vLLM, no port.
+
+Intended pipeline (WP2):
+
+1. **Extract patches** from `.svs` slides (`openslide`, 256×256 tiles).
+2. **Encode patches** with the TITAN image encoder → cache per slide:
+   `embeddings.pt` `[N×768]` + `coords.pt` `[N×2]`.
+3. **Retrieve at inference** via `retrieval/titan_retriever.py` (cosine similarity
+   between text query and patch embeddings).
+
+Planned repo scripts (add under `scripts/cluster/` when ready):
 
 ```bash
-sbatch scripts/cluster/start_qwen_server.sh
+# One-shot overnight batch — template pattern:
+sbatch scripts/cluster/encode_titan.sh      # encodes all slides → dominik/embeddings/
 ```
 
-Or from the cluster scripts folder after copying/adapting paths.
+Interactive smoke test on one slide:
+
+```bash
+srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
+
+enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
+cd /mnt/projects/mlmi/reg2/repos/TITAN
+# Follow TITAN repo README for encode API — wire output into TitanRetriever
+python -c "from retrieval.titan_retriever import TitanRetriever; print('OK')"
+```
+
+Cache embeddings under your personal work dir so teammates can share them:
+
+```bash
+mkdir -p /mnt/projects/mlmi/reg2/dominik/embeddings
+chmod 777 /mnt/projects/mlmi/reg2/dominik/embeddings
+```
+
+See [`docs/work_plan.md`](work_plan.md) §3–§4 (Owner A / Owner C) for the full
+TITAN wiring checklist.
+
+### 7.4 Other deployed models (Patho-R1, InternVL, MedGemma)
+
+Same general pattern applies:
+
+| Step | Action |
+|---|---|
+| 1 | Find weights under `models/` or code under `repos/` |
+| 2 | Start a SLURM job (`sbatch` or `srun`) — never on head |
+| 3 | Run inside enroot with `/mnt` mounted |
+| 4 | Record model path + port in `configs/paths.yaml` |
+| 5 | Expose as an `AnswerBackend` in `graph/controller.py` or a baseline script |
+
+For HuggingFace-style models, the team container already has PyTorch + transformers.
+For vLLM-served models, copy `start_qwen_server.sh` and change `MODEL=` + GPU count.
+
+### 7.5 SLURM script checklist (repo convention)
+
+When adding `scripts/cluster/my_job.sh`:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=my-job
+#SBATCH --partition=24g
+#SBATCH --qos=students_normal
+#SBATCH --gres=gpu:1          # scale up for big models
+#SBATCH --mem=32G
+#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.out
+#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.err
+
+set -euo pipefail
+mkdir -p /mnt/projects/mlmi/reg2/dominik/logs
+
+REPO=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+CONTAINER=/mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh  # or your export
+
+enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
+  "${CONTAINER}" \
+  python "${REPO}/path/to/script.py" --arg value
+```
+
+Submit and monitor:
+
+```bash
+sbatch scripts/cluster/my_job.sh
+squeue -u $USER
+jobstats <job-id>
+cat /mnt/projects/mlmi/reg2/dominik/logs/my_job_<job-id>.out
+```
 
 ---
 
@@ -257,7 +519,7 @@ jobstats <job-id>
 cat /mnt/projects/mlmi/reg2/dominik/logs/explore_*.out
 ```
 
-The batch script runs `explore_wsi.py` inside `dominik_mlmi` (or your latest exported `.sqsh`).
+The batch script runs `notebooks/explore_wsi.ipynb` headlessly via `jupyter nbconvert` inside `dominik_mlmi` (or your latest exported `.sqsh`).
 
 ---
 
@@ -266,8 +528,15 @@ The batch script runs `explore_wsi.py` inside `dominik_mlmi` (or your latest exp
 | Task | Command |
 |---|---|
 | Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l` |
+| Cursor SSH job | `sbatch --partition=24g /mnt/general/examples/ssh.sh` |
 | Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi` |
 | Export container | `enroot export --force --output .../dominik_$(date +%Y%m%d)_base.sqsh dominik_mlmi` |
-| Submit job | `sbatch scripts/cluster/explore_data.sh` |
-| Job queue | `squeue` |
+| Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
+| Start Qwen (vLLM) | `sbatch scripts/cluster/start_qwen_server.sh` |
+| Test Qwen client | `python extraction/qa_extractor.py` |
+| WP3 extraction | `python extraction/extract_report_parts.py` |
+| Explore WSI (batch) | `sbatch scripts/cluster/explore_data.sh` |
+| List models | `ls /mnt/projects/mlmi/reg2/models/` |
+| Job queue | `squeue -u $USER` |
 | GPU usage | `jobstats <job-id>` |
+| Model config | `configs/paths.yaml` |
