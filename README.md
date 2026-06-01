@@ -25,6 +25,20 @@ Entry points for first TODOS per person:
 | DOGA   | Graph JSONL    | `data/graph/execution_graph.jsonl`                       |
 | NICK   | Semantic RAG   | `memory/hipporag2.py`, `memory/graphrag.py`              |
 | DOMI   | WSI, WP3, LoRA | `vision/`, `scripts/vision/`, `extraction/`, `training/` |
+
+**DOMI quick commands (cluster):**
+
+```bash
+# Baseline 1 — blurry thumbnail (no GPU)
+python -m scripts.vision.build_thumbnail_cache --slide YOUR.svs
+python -m baselines.run_agent --backend qwen --visual thumbnail --slide-id YOUR.svs
+
+# Baseline 2 — TITAN slide embedding (GPU + HF token)
+python -m scripts.vision.encode_slide_embeddings --slide YOUR.svs
+python -m baselines.run_agent --backend qwen --visual slide_embed --slide-id YOUR.svs
+```
+
+See `vision/README.md` for sbatch jobs.
 | XUN    | VLM serve      | `configs/paths.yaml`, `scripts/cluster/`                 |
 
 
