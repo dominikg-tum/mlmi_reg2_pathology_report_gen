@@ -20,3 +20,8 @@ defaults:
   visual: thumbnail
   retriever: none
   navigator: graph_guided
+
+titan:
+  model_id: MahmoodLab/TITAN
+  max_patches_per_slide: 512
+  batch_size: 32

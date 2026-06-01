@@ -34,6 +34,8 @@ models:
   internvl3_5_8b: /mnt/projects/mlmi/reg2/models/InternVL3_5-8B
   internvl3_5_14b: /mnt/projects/mlmi/reg2/models/InternVL3_5-14B
   medgemma_4b: /mnt/projects/mlmi/reg2/models/medgemma-1.5-4b-it
+  # HuggingFace id or local mirror; requires HF token + MahmoodLab/TITAN access
+  titan: MahmoodLab/TITAN
 
 qwen:
   model_path: /mnt/projects/mlmi/reg2/models/Qwen3-VL-8B-Instruct
