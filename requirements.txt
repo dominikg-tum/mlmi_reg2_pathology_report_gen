@@ -1,10 +1,11 @@
-# Repo-specific dependencies (install inside dominik_mlmi on cluster)
-openslide-python
-opencv-python-headless
-tqdm
-pyyaml
-pandas
-openpyxl
-openai
-numpy
-pillow
+numpy>=1.24
+pyyaml>=6.0
+openai>=1.0
+pytest>=7.0
+
+# Optional eval / training
+# pandas
+# rouge-score
+# sacrebleu
+# sentence-transformers
+# torch

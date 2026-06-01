@@ -22,8 +22,8 @@ repo:
   path: /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 
 qwen:
-  # Confirm model path and serving port with teammates
-  model_path: /mnt/projects/mlmi/reg2/models/Qwen2.5-7B-Instruct
+  # XUN: confirm path and port after vLLM deploy
+  model_path: /mnt/projects/mlmi/reg2/models/Qwen3-VL-8B-Instruct
   api_base_url: http://localhost:8000/v1
   api_key: token-abc123
-  model_name: Qwen2.5-7B-Instruct
+  model_name: Qwen3-VL-8B-Instruct

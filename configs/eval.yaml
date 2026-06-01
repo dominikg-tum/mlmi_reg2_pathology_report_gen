@@ -1,0 +1,14 @@
+manifest: data/manifests/cases.csv
+labels_dir: data/labels
+predictions_dir: runs
+default_split: test
+
+metrics:
+  chain:
+    - binary_path_validity
+    - edge_f1
+    - mess
+  report:
+    - rouge_l
+    - bleu4
+    - clinical_accuracy
