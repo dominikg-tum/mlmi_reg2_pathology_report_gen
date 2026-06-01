@@ -29,9 +29,14 @@ def slide_cache_for(slide_id: str, cache_root: Path | None) -> SlideCache | None
     return SlideCache(
         slide_id=slide_id,
         thumbnail_path=thumb if thumb.exists() else None,
+        slide_embedding_path=d / "slide_embedding.pt",
+        evidence_dir=d / "evidence",
         embeddings_low=d / "embeddings_low.pt",
         embeddings_mid=d / "embeddings_mid.pt",
         embeddings_high=d / "embeddings_high.pt",
+        coords_low=d / "coords_low.pt",
+        coords_mid=d / "coords_mid.pt",
+        coords_high=d / "coords_high.pt",
     )
 
 
