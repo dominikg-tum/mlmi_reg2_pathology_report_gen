@@ -6,21 +6,27 @@ Step-wise diagnostic reasoning from uterine WSIs → **reasoning chain** + **fin
 
 ## Documentation
 
-| Doc | Purpose |
-|-----|---------|
+
+| Doc                                                      | Purpose                                 |
+| -------------------------------------------------------- | --------------------------------------- |
 | **[docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)** | Architecture, WPs, team lanes, commands |
-| [docs/cluster_setup.md](docs/cluster_setup.md) | Garching cluster, enroot, SLURM, vLLM |
+| [docs/cluster_setup.md](docs/cluster_setup.md)           | Garching cluster, enroot, SLURM, vLLM   |
+
 
 ## Team workflow
 
 Pull from `main` · feature branches · PR + reviewer · ShareLaTeX final report.
 
-| Person | Lane | Entry points |
-|--------|------|--------------|
-| DOGA | Graph JSONL | `data/graph/execution_graph.jsonl` |
-| NICK | Semantic RAG | `memory/hipporag2.py`, `memory/graphrag.py` |
-| DOMI | WSI, WP3, LoRA | `vision/`, `scripts/vision/`, `extraction/`, `training/` |
-| XUN | VLM serve | `configs/paths.yaml`, `scripts/cluster/` |
+Entry points for first TODOS per person:
+
+
+| Person | Lane           | Entry points                                             |
+| ------ | -------------- | -------------------------------------------------------- |
+| DOGA   | Graph JSONL    | `data/graph/execution_graph.jsonl`                       |
+| NICK   | Semantic RAG   | `memory/hipporag2.py`, `memory/graphrag.py`              |
+| DOMI   | WSI, WP3, LoRA | `vision/`, `scripts/vision/`, `extraction/`, `training/` |
+| XUN    | VLM serve      | `configs/paths.yaml`, `scripts/cluster/`                 |
+
 
 ## Repository structure
 
