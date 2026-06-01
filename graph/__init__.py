@@ -1,19 +1,30 @@
-"""Diagnostic reasoning graph: hard-coded structure + deterministic traversal.
+"""Diagnostic reasoning graph: JSONL structure + validation."""
 
-The graph and controller OWN traversal. The model only answers one node's
-question at a time and never decides where to go.
-"""
+from graph.loader import load_graph, validate_graph
+from graph.schema import (
+    InteractionType,
+    Node,
+    NodeKind,
+    RetrievalLevel,
+    Tier,
+    VisualPolicy,
+)
 
-from graph.diagnostic_graph import GRAPH, ROOT_ID, AnswerType, Node, NodeKind
-from graph.controller import AnswerBackend, DummyBackend, traverse
+GRAPH, ROOT_ID = load_graph()
+
+# Legacy alias used by guided-decoding backends
+AnswerType = InteractionType
 
 __all__ = [
     "GRAPH",
     "ROOT_ID",
     "Node",
     "NodeKind",
+    "InteractionType",
     "AnswerType",
-    "AnswerBackend",
-    "DummyBackend",
-    "traverse",
+    "Tier",
+    "VisualPolicy",
+    "RetrievalLevel",
+    "load_graph",
+    "validate_graph",
 ]
