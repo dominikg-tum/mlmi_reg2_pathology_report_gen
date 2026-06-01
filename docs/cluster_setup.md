@@ -403,7 +403,7 @@ response = client.chat.completions.create(
 )
 ```
 
-For the agent loop, see `baselines/zero_shot.py` — it uses the same
+For the agent loop, see `baselines/run_agent.py` — it uses the same
 OpenAI-compatible endpoint with guided decoding.
 
 > **Cross-job access:** if the vLLM server runs in a *different* SLURM job than
@@ -421,7 +421,7 @@ Intended pipeline (WP2):
 1. **Extract patches** from `.svs` slides (`openslide`, 256×256 tiles).
 2. **Encode patches** with the TITAN image encoder → cache per slide:
    `embeddings.pt` `[N×768]` + `coords.pt` `[N×2]`.
-3. **Retrieve at inference** via `retrieval/titan_retriever.py` (cosine similarity
+3. **Retrieve at inference** via `retrieval/titan_cosine.py` (cosine similarity
    between text query and patch embeddings).
 
 Planned repo scripts (add under `scripts/cluster/` when ready):
@@ -439,7 +439,7 @@ srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
 cd /mnt/projects/mlmi/reg2/repos/TITAN
 # Follow TITAN repo README for encode API — wire output into TitanRetriever
-python -c "from retrieval.titan_retriever import TitanRetriever; print('OK')"
+python -c "from retrieval.titan_cosine import TitanCosineRetriever; print('OK')"
 ```
 
 Cache embeddings under your personal work dir so teammates can share them:
@@ -449,8 +449,7 @@ mkdir -p /mnt/projects/mlmi/reg2/dominik/embeddings
 chmod 777 /mnt/projects/mlmi/reg2/dominik/embeddings
 ```
 
-See [`docs/work_plan.md`](work_plan.md) §3–§4 (Owner A / Owner C) for the full
-TITAN wiring checklist.
+See [`docs/PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) for the full TITAN wiring checklist.
 
 ### 7.4 Other deployed models (Patho-R1, InternVL, MedGemma)
 
@@ -462,7 +461,7 @@ Same general pattern applies:
 | 2 | Start a SLURM job (`sbatch` or `srun`) — never on head |
 | 3 | Run inside enroot with `/mnt` mounted |
 | 4 | Record model path + port in `configs/paths.yaml` |
-| 5 | Expose as an `AnswerBackend` in `graph/controller.py` or a baseline script |
+| 5 | Expose as an `AnswerBackend` in `agent/backends.py` or `baselines/run_agent.py` |
 
 For HuggingFace-style models, the team container already has PyTorch + transformers.
 For vLLM-served models, copy `start_qwen_server.sh` and change `MODEL=` + GPU count.
