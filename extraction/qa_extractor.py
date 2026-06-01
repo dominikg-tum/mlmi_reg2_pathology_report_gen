@@ -1,12 +1,6 @@
-"""WP3: extract a Q->A chain from each english_report using local Qwen (vLLM).
+"""WP3: extract Q->A / chain-of-thought from english_report (DOMI).
 
-This produces the supervised training data for WP5 AND validates that Han's graph
-covers your reports. The graph supplies the questions; the report supplies which
-path was taken and what the answers are.
-
-Two output uses:
-  * label which graph path a case follows (-> Binary Path Validity / Edge-F1 GT)
-  * per-node target answers for LoRA fine-tuning
+Produces supervised labels for eval and LoRA training.
 """
 
 from __future__ import annotations
@@ -22,8 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SYSTEM_PROMPT = (
     "You are a pathology expert. Answer each question based ONLY on the provided "
-    "report. If a fact is not stated, answer 'not mentioned'. Return JSON only, as "
-    "a list of {\"q\": ..., \"a\": ...} objects in the order asked."
+    "report. If a fact is not stated, answer 'not mentioned'. Return JSON only as "
+    '{"chain-of-thought": [{"question": "...", "answer": "...", "next_question": "..."}]}'
 )
 
 
@@ -46,16 +40,9 @@ def extract_qa(
     *,
     constrain_choices: list[list[str]] | None = None,
 ) -> str:
-    """Ask the model to answer `questions` against `report_text`.
-
-    When `constrain_choices` is given (one choice list per question), pass them to
-    vLLM guided decoding so answers stay on-graph. For the open extraction pass we
-    usually leave it None and constrain later at agent inference time.
-    """
     questions_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
     extra_body: dict[str, Any] = {}
     if constrain_choices is not None:
-        # Single-question constrained answering; loop per question for multiple.
         extra_body["guided_choice"] = constrain_choices[0]
 
     response = client.chat.completions.create(
@@ -73,29 +60,35 @@ def extract_qa(
     return response.choices[0].message.content or ""
 
 
-def parse_qa(raw: str) -> list[dict[str, str]]:
-    data = json.loads(raw)
-    if isinstance(data, dict) and "qa_chain" in data:
-        return data["qa_chain"]
-    if isinstance(data, list):
-        return data
-    raise ValueError(f"Unexpected JSON shape: {type(data)}")
+def questions_from_graph() -> list[str]:
+    from graph import GRAPH, ROOT_ID
+
+    out = []
+    nid = ROOT_ID
+    seen = set()
+    while nid and nid not in seen:
+        seen.add(nid)
+        node = GRAPH[nid]
+        out.append(node.question)
+        if node.is_leaf:
+            break
+        if node.options:
+            nid = node.edges.get(node.options[0])
+        elif node.edges:
+            nid = next(iter(node.edges.values()))
+        else:
+            break
+    return out
 
 
 def main() -> None:
     cfg = load_config()
     client = build_client(cfg)
     model = cfg["qwen"]["model_name"]
-
     sample_report = (
         "Endometrioid adenocarcinoma, FIGO grade 2, with deep myometrial invasion."
     )
-    sample_questions = [
-        "What organ and procedure does this specimen come from?",
-        "What is the glandular/architectural pattern?",
-        "Is there myometrial invasion?",
-    ]
-    raw = extract_qa(client, model, sample_report, sample_questions)
+    raw = extract_qa(client, model, sample_report, questions_from_graph())
     print(raw)
 
 
