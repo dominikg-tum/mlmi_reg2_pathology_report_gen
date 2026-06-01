@@ -1,0 +1,3 @@
+case_id,slide_ids,case_class,split,n_slides
+example_001,be61bc63-d708-4b81-9ea0-2370524e73a8.svs,A,train,1
+example_002,test_slide.svs,B,test,1
