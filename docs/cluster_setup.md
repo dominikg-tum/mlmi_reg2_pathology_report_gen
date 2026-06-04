@@ -59,7 +59,11 @@ enroot start my_env
 # when adding new dependencies:
 enroot start --rw my_env
 # save changes
-exit && enroot export --output /mnt/projects/mlmi/reg2/containers/xxxx.sqsh my_dev
+exit && enroot export --force \
+  --output /mnt/projects/mlmi/reg2/containers/xxxx.sqsh \
+  my_env
+# start from sqsh file
+enroot start --root --rw --mount /mnt:mnt --mount /tmp:tmp /mnt/projects/mlmi/reg2/containers/xxxx.sqsh
 ```
 
 ### 3.2 Dominik's current setup (already created)
