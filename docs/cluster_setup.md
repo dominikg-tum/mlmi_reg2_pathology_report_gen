@@ -56,6 +56,10 @@ The cluster uses [enroot](https://github.com/NVIDIA/enroot) for containerized en
 enroot import -- /mnt/projects/mlmi/reg2/containers/qwen25_graphrag.sqsh
 enroot create --name my_env qwen25_graphrag.sqsh
 enroot start my_env
+# when adding new dependencies:
+enroot start --rw my_env
+# save changes
+exit && enroot export --output /mnt/projects/mlmi/reg2/containers/xxxx.sqsh my_dev
 ```
 
 ### 3.2 Dominik's current setup (already created)
