@@ -89,9 +89,46 @@ You can edit files on the cluster from your laptop using the **Remote-SSH** exte
    # copy the line like: ssh -p 22445 you@essen.garching.camp.cluster
    ```
    Useful commands:
-   - Clean up ssh.out: truncate -s 0 ssh.out
-   - Cancel job: scancel <JOBID>
-   - Check your job: squeue -u $USER
+   - Clean up ssh.out:
+      ```bash
+     truncate -s 0 ssh.out
+      ```
+   - Cancel job:
+   ```bash
+   scancel <JOBID>
+   ```
+   - Check your job:
+   ```bash
+   squeue -u $USER
+   ```
+   - Check GPU status (20GB for 7-8B model, 80GB for 30-32B model):
+   ```bash
+   nvidia-smi
+   ```
+   - Run VLM (single GPU, change dtype when running on H100/H200)
+   ```bash
+   CUDA_VISIBLE_DEVICES=0 vllm serve \
+  /mnt/projects/mlmi/reg2/models/<MODEL_NAME> \
+  --host 0.0.0.0 \
+  --port <PORT (take from 8000)> \
+  --dtype half \
+  --gpu-memory-utilization 0.95 \
+  --max-model-len 8192 \
+  --trust-remote-code  
+   ```
+   - Run VLM (multiple GPUs)
+   ```bash
+   CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve \
+  /mnt/projects/mlmi/reg2/models/<MODEL_NAME> \
+  --host 0.0.0.0 \
+  --port <PORT (take from 8000)> \
+  --dtype bfloat16 \
+  --tensor-parallel-size 4 \
+  --gpu-memory-utilization 0.95 \
+  --max-model-len 512 \
+  --max-num-seqs 1\
+  --trust-remote-code  
+   ```
 3. On your laptop in **Cursor** (or VS Code): **Ctrl+Shift+P** → **Remote-SSH: Connect to Host** → paste that `ssh -p PORT user@node...` command.
 4. Open folder: `/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen`
 
