@@ -88,6 +88,10 @@ You can edit files on the cluster from your laptop using the **Remote-SSH** exte
    sleep 15 && cat ~/ssh.out
    # copy the line like: ssh -p 22445 you@essen.garching.camp.cluster
    ```
+   Useful commands:
+   - Clean up ssh.out: truncate -s 0 ssh.out
+   - Cancel job: scancel <JOBID>
+   - Check your job: squeue -u $USER
 3. On your laptop in **Cursor** (or VS Code): **Ctrl+Shift+P** → **Remote-SSH: Connect to Host** → paste that `ssh -p PORT user@node...` command.
 4. Open folder: `/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen`
 
