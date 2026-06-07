@@ -230,3 +230,8 @@ docs/*.pdf
 
 # Run outputs
 runs/
+
+# macOS / SMB metadata (often copied onto cluster via Finder)
+.DS_Store
+._*
+.___pycache__
