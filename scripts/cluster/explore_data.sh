@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=mlmi-explore
+#SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
 #SBATCH --gres=gpu:1
@@ -10,9 +11,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=load_paths.sh
-source "${SCRIPT_DIR}/load_paths.sh"
+source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
 load_cluster_paths
 
 mkdir -p "${LOGS_DIR}"

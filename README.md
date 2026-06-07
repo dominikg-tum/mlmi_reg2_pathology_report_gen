@@ -26,6 +26,7 @@ Entry points for first TODOS per person:
 | NICK   | Semantic RAG   | `memory/hipporag2.py`, `memory/graphrag.py`              |
 | DOMI   | WSI, WP3, LoRA | `vision/`, `scripts/vision/`, `extraction/`, `training/` |
 
+
 **DOMI quick commands (cluster):**
 
 ```bash
@@ -40,7 +41,6 @@ python -m baselines.run_agent --backend qwen --visual slide_embed --slide-id YOU
 
 See `vision/README.md` for sbatch jobs.
 | XUN    | VLM serve      | `configs/paths.yaml`, `scripts/cluster/`                 |
-
 
 ## Repository structure
 

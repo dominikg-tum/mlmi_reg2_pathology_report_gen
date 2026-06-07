@@ -1,4 +1,4 @@
-# Source from SLURM scripts: source "${SCRIPT_DIR}/load_paths.sh"
+# Source from SLURM scripts with an absolute path (sbatch copies scripts to /var/spool/slurmd/…).
 # Sets REPO, CONTAINER, MODEL, MODEL_NAME, PROJECT_ROOT, LOGS_DIR from configs/paths.yaml.
 
 _cluster_paths_repo() {

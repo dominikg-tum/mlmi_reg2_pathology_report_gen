@@ -485,6 +485,7 @@ When adding `scripts/cluster/my_job.sh`:
 ```bash
 #!/bin/bash
 #SBATCH --job-name=my-job
+#SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
 #SBATCH --gres=gpu:1          # scale up for big models; CPU/RAM follow GPU count
@@ -492,8 +493,8 @@ When adding `scripts/cluster/my_job.sh`:
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.err
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/load_paths.sh"
+# Use absolute path — sbatch copies the script to /var/spool/slurmd/…
+source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
 load_cluster_paths
 mkdir -p "${LOGS_DIR}"
 
