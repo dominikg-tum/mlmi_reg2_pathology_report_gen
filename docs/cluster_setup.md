@@ -85,17 +85,28 @@ enroot start --root --rw \
   dominik_mlmi
 ```
 
-### 3.3 Install dependencies (inside the container)
+### 3.3 Install dependencies
+
+**Local laptop** (unit tests only — no openslide/GPU):
 
 ```bash
-pip list
-cat /mnt/projects/mlmi/reg2/requirements_clean.txt
+cd mlmi_reg2_pathology_report_gen
+uv venv && uv sync --extra dev
+uv run pytest tests/
+```
 
+**Inside the cluster container** (GPU jobs):
+
+```bash
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+
+# preferred — editable install with lockfile
+uv pip install -e ".[dev,cluster]"
+
+# or legacy pip
 pip install -r /mnt/projects/mlmi/reg2/requirements_clean.txt
-pip install -r /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/requirements.txt
-
-# WP1 / WP2 extras
-pip install openslide-python opencv-python-headless tqdm
+pip install -r requirements.txt
+pip install openslide-python scikit-learn tqdm
 
 exit
 ```
@@ -429,7 +440,7 @@ TITAN is a **frozen encoder**, not a generative API. You load weights from
 
 Intended pipeline (WP2):
 
-1. **Extract patches** from `.svs` slides (`openslide`, 256×256 tiles).
+1. **Extract patches** from `.svs` slides (`openslide`, 512×512 tiles at ×10/×20).
 2. **Encode patches** with the TITAN image encoder → cache per slide:
    `embeddings.pt` `[N×768]` + `coords.pt` `[N×2]`.
 3. **Retrieve at inference** via `retrieval/titan_cosine.py` (cosine similarity

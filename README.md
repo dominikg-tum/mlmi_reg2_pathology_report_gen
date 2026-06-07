@@ -37,9 +37,13 @@ python -m baselines.run_agent --backend qwen --visual thumbnail --slide-id YOUR.
 # Baseline 2 — TITAN slide embedding (GPU + HF token)
 python -m scripts.vision.encode_slide_embeddings --slide YOUR.svs
 python -m baselines.run_agent --backend qwen --visual slide_embed --slide-id YOUR.svs
+
+# P2 — patch retrieval (tile → verify → encode → k-means → demo)
+# See retrieval/README.md and vision/README.md for full cluster pipeline.
 ```
 
 See `vision/README.md` for sbatch jobs.
+
 | XUN    | VLM serve      | `configs/paths.yaml`, `scripts/cluster/`                 |
 
 ## Repository structure
@@ -58,12 +62,27 @@ scripts/         manifest, vision cache jobs
 data/graph/      execution_graph.jsonl (seed)
 ```
 
-## Quick start
+## Dev environment
+
+Python **3.11**. Use [uv](https://docs.astral.sh/uv/) — `.venv` is gitignored.
 
 ```bash
 cd mlmi_reg2_pathology_report_gen
-pip install -r requirements.txt pyyaml numpy pytest
+uv venv                    # creates .venv/
+source .venv/bin/activate  # optional; uv run works without it
+uv sync --extra dev        # install from uv.lock
+uv run pytest tests/
+```
 
+Cluster container (openslide + torch + transformers):
+
+```bash
+uv pip install -e ".[dev,cluster]"
+```
+
+Fallback without uv: `pip install -r requirements.txt`
+
+```bash
 pytest tests/
 
 # P1 agent — thumbnail, no TITAN
