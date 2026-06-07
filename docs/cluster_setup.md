@@ -117,8 +117,8 @@ echo "Saved! Don't forget: always save to a new file after changes."
 ### 4.1 Start an interactive GPU session
 
 ```bash
-# From head — 24G partition, one GPU, 32G RAM
-srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
+# From head — 24G partition, one GPU (CPU/RAM auto-allocated per GPU)
+srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
 ```
 
 ### 4.2 Create your working directory
@@ -375,7 +375,7 @@ edit `qwen.model_path` and `qwen.model_name` in `configs/paths.yaml` (e.g. to
 #### Start interactively (debugging)
 
 ```bash
-srun --partition=24g --qos=students_normal --gres=gpu:2 --mem=60G --pty bash -l
+srun --partition=24g --qos=students_normal --gres=gpu:2 --pty bash -l
 
 enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   /mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh \
@@ -445,7 +445,7 @@ sbatch scripts/cluster/encode_titan.sh      # encodes all slides → dominik/emb
 Interactive smoke test on one slide:
 
 ```bash
-srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
+srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
 cd /mnt/projects/mlmi/reg2/repos/TITAN
@@ -487,8 +487,7 @@ When adding `scripts/cluster/my_job.sh`:
 #SBATCH --job-name=my-job
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
-#SBATCH --gres=gpu:1          # scale up for big models
-#SBATCH --mem=32G
+#SBATCH --gres=gpu:1          # scale up for big models; CPU/RAM follow GPU count
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.err
 
@@ -539,7 +538,7 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 
 | Task | Command |
 |---|---|
-| Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l` |
+| Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l` |
 | Cursor SSH job | `sbatch --partition=24g /mnt/general/examples/ssh.sh` |
 | Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi` |
 | Export container | `enroot export --force --output .../dominik_$(date +%Y%m%d)_base.sqsh dominik_mlmi` |

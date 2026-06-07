@@ -3,7 +3,6 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/explore_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/explore_%j.err
 #SBATCH --mail-type=END,FAIL

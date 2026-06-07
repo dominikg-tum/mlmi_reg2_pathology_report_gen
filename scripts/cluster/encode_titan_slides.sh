@@ -3,8 +3,6 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
 #SBATCH --time=08:00:00
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/titan_slide_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/titan_slide_%j.err

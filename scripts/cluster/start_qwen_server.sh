@@ -3,7 +3,6 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
 #SBATCH --gres=gpu:2
-#SBATCH --mem=60G
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.err
 
