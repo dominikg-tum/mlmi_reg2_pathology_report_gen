@@ -2,8 +2,8 @@
 #SBATCH --job-name=wsi-levels
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --gres=gpu:1
+#SBATCH --mem=16G
 #SBATCH --time=00:15:00
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/wsi_levels_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/wsi_levels_%j.err
@@ -17,7 +17,7 @@
 #   tail -f /mnt/projects/mlmi/reg2/dominik/logs/wsi_levels_<JOBID>.out
 #
 # Interactive (compute node):
-#   srun --partition=24g --qos=students_normal --cpus-per-task=2 --mem=8G --pty bash -l
+#   srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=16G --pty bash -l
 #   SLIDE='case01.svs' bash scripts/cluster/verify_wsi_levels.sh
 
 set -euo pipefail
