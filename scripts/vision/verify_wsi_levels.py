@@ -20,18 +20,55 @@ from vision.wsi_io import (
 _MPP_4X_FALLBACK = 2.5
 
 
-def _resolve_slide(data_dir: Path, slide_arg: str) -> Path:
+def _data_dir_hint(data_dir: Path, cfg: dict) -> str:
+    lines = [f"data_dir: {data_dir}"]
+    if not data_dir.exists():
+        lines.append("  (path does not exist)")
+        return "\n".join(lines)
+
+    try:
+        entries = sorted(data_dir.iterdir())
+    except OSError as exc:
+        lines.append(f"  (cannot list directory: {exc})")
+        return "\n".join(lines)
+
+    lines.append(f"  top-level entries ({len(entries)}): {[p.name for p in entries[:10]]}")
+    if len(entries) > 10:
+        lines.append("  ...")
+
+    labels = Path(cfg["cluster"]["labels_xlsx"])
+    if labels.is_file():
+        try:
+            import pandas as pd
+
+            df = pd.read_excel(labels)
+            for col in ("slide_ids", "slide_id", "Slide_ID"):
+                if col in df.columns and len(df):
+                    example = str(df[col].iloc[0]).split(",")[0].strip()
+                    lines.append(f"  example slide from labels ({col}): {example!r}")
+                    lines.append(f"  retry: SLIDE='{example}' sbatch scripts/cluster/verify_wsi_levels.sh")
+                    break
+        except Exception:
+            pass
+
+    lines.append(f"  find slides: find {data_dir} -name '*.svs' | head")
+    return "\n".join(lines)
+
+
+def _resolve_slide(data_dir: Path, slide_arg: str, *, cfg: dict) -> Path:
     if slide_arg:
         candidates = [data_dir / slide_arg]
         if not candidates[0].exists():
             candidates = list(data_dir.rglob(slide_arg))
         if not candidates:
-            raise SystemExit(f"No slide matching {slide_arg!r} under {data_dir}")
+            raise SystemExit(
+                f"No slide matching {slide_arg!r} under {data_dir}\n{_data_dir_hint(data_dir, cfg)}"
+            )
         return candidates[0]
 
     files = find_svs_files(data_dir, limit=1)
     if not files:
-        raise SystemExit(f"No .svs files under {data_dir}")
+        raise SystemExit(f"No .svs files under {data_dir}\n{_data_dir_hint(data_dir, cfg)}")
     return files[0]
 
 
@@ -138,7 +175,7 @@ def main() -> None:
     if not data_dir.is_dir():
         raise SystemExit(f"Data directory not found: {data_dir}")
 
-    svs_path = _resolve_slide(data_dir, args.slide.strip())
+    svs_path = _resolve_slide(data_dir, args.slide.strip(), cfg=cfg)
     inspect_slide(svs_path)
 
 

@@ -14,6 +14,7 @@
 # Usage (from cluster head — never run Python openslide on the head node):
 #   sbatch scripts/cluster/verify_wsi_levels.sh
 #   SLIDE='case01.svs' sbatch scripts/cluster/verify_wsi_levels.sh
+#   DATA_DIR=/path/to/slides SLIDE='case01.svs' sbatch scripts/cluster/verify_wsi_levels.sh
 #   tail -f /mnt/projects/mlmi/reg2/dominik/logs/wsi_levels_<JOBID>.out
 #
 # Interactive (compute node):
@@ -28,14 +29,16 @@ load_cluster_paths
 mkdir -p "${LOGS_DIR}"
 
 SLIDE="${SLIDE:-}"
+DATA_DIR="${DATA_DIR:-}"
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   "${CONTAINER}" \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q openslide-python pillow pyyaml 2>/dev/null || true
+    pip install -q openslide-python pillow pyyaml pandas openpyxl 2>/dev/null || true
     ARGS=(python -m scripts.vision.verify_wsi_levels)
+    [[ -n '${DATA_DIR}' ]] && ARGS+=(--data-dir '${DATA_DIR}')
     [[ -n '${SLIDE}' ]] && ARGS+=(--slide '${SLIDE}')
     \"\${ARGS[@]}\"
   "
