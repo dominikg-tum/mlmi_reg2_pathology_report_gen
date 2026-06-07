@@ -9,6 +9,7 @@ from graph.schema import Node
 
 class SemanticMemory(Protocol):
     def build_index(self, train_reports_path: str, *, split: str = "train") -> None: ...
+
     def retrieve(self, node: Node, query: str, *, k: int = 5) -> str: ...
 
 
@@ -23,4 +24,8 @@ def get_semantic_memory(method: str) -> SemanticMemory | None:
         from memory.graphrag import GraphRAGMemory
 
         return GraphRAGMemory()
+    if method == "hybridrag":
+        from memory.hybridrag import HybridRAGMemory
+
+        return HybridRAGMemory()
     raise ValueError(f"Unknown memory method: {method!r}")

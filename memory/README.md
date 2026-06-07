@@ -1,10 +1,11 @@
 # Memory (NICK)
 
-| `--memory` | Status |
-|------------|--------|
-| `flat` | Episodic only (default) — `memory/episodic.py` |
-| `hipporag2` | Stub — implement `hipporag2.py` |
-| `graphrag` | Stub — implement `graphrag.py` |
+| `--memory`  | Status                                         |
+|-------------|------------------------------------------------|
+| `flat`      | Episodic only (default) — `memory/episodic.py` |
+| `hipporag2` | Stub — implement `hipporag2.py`                |
+| `graphrag`  | Stub — implement `graphrag.py`                 |
+| `hybridrag` | Stub — implement `hybridrag.py`                |
 
 Build index from **train split only** (no test leakage). Semantic memory never routes the graph.
 
