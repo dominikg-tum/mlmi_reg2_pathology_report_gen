@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vision.cache import SlideCache
+
+if TYPE_CHECKING:
+    from retrieval.titan_cosine import RetrievedPatch
 
 
 class PatchRetriever(Protocol):
@@ -16,7 +19,7 @@ class PatchRetriever(Protocol):
         level: str = "high",
         k: int = 3,
         exclude: set[int] | None = None,
-    ) -> tuple[Any, list[int]]: ...
+    ) -> list["RetrievedPatch"]: ...
 
 
 def get_retriever(method: str, **kwargs) -> PatchRetriever | None:

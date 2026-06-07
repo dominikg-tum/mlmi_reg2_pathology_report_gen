@@ -42,6 +42,8 @@ def traverse(
     retriever_method: str = "none",
     navigator_method: str = "graph_guided",
     cache_root: Path | None = None,
+    wsi_path: Path | None = None,
+    wsi_data_dir: Path | None = None,
     max_steps: int = 64,
     confidence_threshold: float = 0.65,
 ) -> list[Step]:
@@ -49,11 +51,19 @@ def traverse(
     root_id = root_id or ROOT_ID
     store = graph_store or JsonGraphStore(graph)
     mem = case_memory or CaseMemory()
-    retriever: PatchRetriever | None = get_retriever(retriever_method)
+    retriever_kwargs: dict[str, Any] = {}
+    if retriever_method in ("titan_cosine", "graph_guided"):
+        from vision.encoders.titan import TitanEncoder
+
+        _encoder = TitanEncoder()
+        retriever_kwargs["text_encoder"] = _encoder.encode_text
+    retriever: PatchRetriever | None = get_retriever(retriever_method, **retriever_kwargs)
     navigator = get_navigator(
         navigator_method,
         visual=visual_method,
         cache_root=cache_root,
+        wsi_path=wsi_path,
+        wsi_data_dir=wsi_data_dir,
     )
 
     node = store.get_node(root_id)

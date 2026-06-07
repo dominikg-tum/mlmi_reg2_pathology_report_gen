@@ -19,10 +19,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GRAPH_PATH = REPO_ROOT / "data" / "graph" / "execution_graph.jsonl"
 
 
-def _default_retrieval_level(node_kind: NodeKind) -> RetrievalLevel:
+def _default_retrieval_level(node_kind: NodeKind, tier: Tier | None = None) -> RetrievalLevel:
+    if tier == Tier.GLOBAL_FEATURES:
+        return RetrievalLevel.MEDIUM
+    if tier in (Tier.LOCAL_FEATURES, Tier.INTEGRATION):
+        return RetrievalLevel.HIGH
     if node_kind in (NodeKind.GLOBAL, NodeKind.COMPARTMENT):
-        return RetrievalLevel.LOW
+        return RetrievalLevel.MEDIUM
     if node_kind == NodeKind.LOCAL:
+        return RetrievalLevel.HIGH
+    if node_kind in (NodeKind.INTEGRATION, NodeKind.REPORT):
         return RetrievalLevel.HIGH
     return RetrievalLevel.MEDIUM
 
@@ -37,20 +43,21 @@ def _default_visual_policy(node_kind: NodeKind) -> VisualPolicy:
 
 def _parse_node(raw: dict[str, Any]) -> Node:
     node_kind = NodeKind(raw["node_kind"])
+    tier = Tier(raw.get("tier", Tier.GLOBAL_FEATURES.value))
     retrieval_raw = raw.get("retrieval_level")
     visual_raw = raw.get("visual_policy")
     return Node(
         id=raw["id"],
         label=raw.get("label", raw["id"]),
         question=raw["question"],
-        tier=Tier(raw.get("tier", Tier.GLOBAL_FEATURES.value)),
+        tier=tier,
         node_kind=node_kind,
         interaction=InteractionType(raw.get("interaction", "single_select")),
         options=list(raw.get("options") or []),
         edges=dict(raw.get("edges") or {}),
         retrieval_level=RetrievalLevel(retrieval_raw)
         if retrieval_raw
-        else _default_retrieval_level(node_kind),
+        else _default_retrieval_level(node_kind, tier),
         visual_policy=VisualPolicy(visual_raw)
         if visual_raw
         else _default_visual_policy(node_kind),

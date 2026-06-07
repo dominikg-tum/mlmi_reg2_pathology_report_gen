@@ -32,11 +32,19 @@ class VisualEvidenceProvider(Protocol):
     ) -> VisualBundle: ...
 
 
-def get_visual_provider(method: str, cache_root: Path | None = None) -> VisualEvidenceProvider:
+def get_visual_provider(
+    method: str,
+    cache_root: Path | None = None,
+    *,
+    wsi_path: Path | None = None,
+    wsi_data_dir: Path | None = None,
+) -> VisualEvidenceProvider:
     if method == "thumbnail":
         from vision.thumbnail import ThumbnailProvider
 
-        return ThumbnailProvider(cache_root=cache_root)
+        return ThumbnailProvider(
+            cache_root, wsi_path=wsi_path, wsi_data_dir=wsi_data_dir
+        )
     if method == "none":
         from vision.thumbnail import NoneVisualProvider
 
@@ -44,7 +52,9 @@ def get_visual_provider(method: str, cache_root: Path | None = None) -> VisualEv
     if method == "patch_retrieve":
         from vision.thumbnail import PatchRetrieveProvider
 
-        return PatchRetrieveProvider(cache_root=cache_root)
+        return PatchRetrieveProvider(
+            cache_root, wsi_path=wsi_path, wsi_data_dir=wsi_data_dir
+        )
     if method == "slide_embed":
         from vision.slide_embed import SlideEmbedProvider
 

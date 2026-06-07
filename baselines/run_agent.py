@@ -9,7 +9,7 @@ from pathlib import Path
 from agent.backends import DummyBackend, ZeroShotQwenBackend
 from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
-from vision.cache import SlideCache, slide_cache_dir
+from vision.cache import build_slide_cache
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,25 +19,6 @@ def load_config() -> dict:
 
     with (REPO_ROOT / "configs" / "paths.yaml").open() as f:
         return yaml.safe_load(f)
-
-
-def slide_cache_for(slide_id: str, cache_root: Path | None) -> SlideCache | None:
-    if cache_root is None:
-        return None
-    d = slide_cache_dir(cache_root, slide_id)
-    thumb = d / "thumbnail.png"
-    return SlideCache(
-        slide_id=slide_id,
-        thumbnail_path=thumb if thumb.exists() else None,
-        slide_embedding_path=d / "slide_embedding.pt",
-        evidence_dir=d / "evidence",
-        embeddings_low=d / "embeddings_low.pt",
-        embeddings_mid=d / "embeddings_mid.pt",
-        embeddings_high=d / "embeddings_high.pt",
-        coords_low=d / "coords_low.pt",
-        coords_mid=d / "coords_mid.pt",
-        coords_high=d / "coords_high.pt",
-    )
 
 
 def main() -> None:
@@ -65,18 +46,22 @@ def main() -> None:
         except ImportError:
             pass
 
+    cfg = load_config()
+    wsi_data_dir = Path(cfg["cluster"]["data_dir"])
+
     if args.backend == "dummy":
         backend = DummyBackend()
     else:
         import openai
 
-        cfg = load_config()
         q = cfg["qwen"]
         client = openai.OpenAI(base_url=q["api_base_url"], api_key=q["api_key"])
         backend = ZeroShotQwenBackend(client, q["model_name"])
 
     mem = CaseMemory.from_config(args.memory)
-    slide_cache = slide_cache_for(args.slide_id, cache_root) if args.slide_id else None
+    slide_cache = (
+        build_slide_cache(cache_root, args.slide_id) if args.slide_id and cache_root else None
+    )
 
     steps = traverse(
         backend,
@@ -86,6 +71,7 @@ def main() -> None:
         retriever_method=args.retriever,
         navigator_method=args.navigator,
         cache_root=cache_root,
+        wsi_data_dir=wsi_data_dir,
     )
     out = chain_to_dict(steps, slide_id=args.slide_id)
     text = json.dumps(out, indent=2)
