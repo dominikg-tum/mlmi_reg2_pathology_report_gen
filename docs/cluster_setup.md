@@ -40,9 +40,10 @@ are older copies; prefer `extraction/` in the repo and outputs under `data/` (se
 
 1. **Never run heavy commands on the head node** — always start a SLURM job first (`srun` or `sbatch`).
 2. **Always run GPU work inside enroot** — model load, offline encode, Phase 1/2 inference, and eval jobs mount `/mnt` and use the container from `configs/paths.yaml` → `user.container_sqsh`.
-3. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
-4. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
-5. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
+3. **Cursor / VS Code SSH must NOT request a GPU** — use `scripts/cluster/start_cursor_ssh.sh` (CPU only). Do **not** use `/mnt/general/examples/ssh.sh` (it sets `--gres=gpu:1` and triggers idle-GPU auto-cancel warnings).
+4. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
+5. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
+6. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
 
 ---
 
@@ -183,20 +184,35 @@ git push
 
 Cursor uses the same Remote SSH flow as VS Code.
 
-### 6.1 Launch an SSH job from head
+### 6.1 Launch an SSH job from head (CPU only — no GPU)
+
+**Do not** use the cluster template `/mnt/general/examples/ssh.sh` — it requests `--gres=gpu:1`.
+Cursor is an editor session and keeps the GPU at 0% util; the scheduler may auto-cancel
+after ~2 hours and wastes a GPU slot that preprocessing jobs need.
+
+Use the repo script instead:
 
 ```bash
-sbatch --partition=24g /mnt/general/examples/ssh.sh
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+sbatch scripts/cluster/start_cursor_ssh.sh
 sleep 15
-cat ssh.out
+tail -20 /mnt/projects/mlmi/reg2/dominik/logs/cursor_ssh_<JOBID>.out
 # Example output:
 # ssh -p 22445 dominikgarstenauer@essen.garching.camp.cluster
 # code --folder-uri vscode-remote://ssh-remote+dominikgarstenauer@essen...
 ```
 
+If you still have an old GPU SSH job running, cancel it after connecting via the new job:
+
+```bash
+scancel <old-ssh-jobid>    # e.g. scancel 10333
+```
+
 In Cursor: **Ctrl+Shift+P** → **Remote-SSH: Connect to Host** → paste the `ssh -p PORT user@node...` command, or use the `code --folder-uri` line.
 
 Open folder: `/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen`
+
+GPU preprocessing / training: submit **separate** `sbatch` jobs (e.g. `scripts/cluster/run_offline_wsi.sh`) — never through the Cursor SSH allocation.
 
 ### 6.2 Recommended Cursor / VS Code settings
 
@@ -289,8 +305,8 @@ Works everywhere but is less convenient for frequent pushes.
 #### Typical day-to-day loop (Cursor + GitHub)
 
 ```bash
-# 1. From head — start SSH job for Cursor
-sbatch --partition=24g /mnt/general/examples/ssh.sh && sleep 15 && cat ssh.out
+# 1. From head — start CPU-only SSH job for Cursor (no GPU)
+sbatch scripts/cluster/start_cursor_ssh.sh && sleep 15 && tail -20 /mnt/projects/mlmi/reg2/dominik/logs/cursor_ssh_*.out
 
 # 2. In Cursor: Remote-SSH → connect → open repo folder
 
@@ -590,7 +606,7 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 | List containers / models | `ls /mnt/projects/mlmi/reg2/containers/` · `ls /mnt/projects/mlmi/reg2/models/` |
 | First-time container | Import team base → `enroot create --name yourname_mlmi` → install deps → export (§3) |
 | Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l` |
-| Cursor SSH job | `sbatch --partition=24g /mnt/general/examples/ssh.sh` |
+| Cursor SSH job (CPU only) | `sbatch scripts/cluster/start_cursor_ssh.sh` — **not** `/mnt/general/examples/ssh.sh` |
 | Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp yourname_mlmi` |
 | Export container | `enroot export --force --output .../yourname_$(date +%Y%m%d)_base.sqsh yourname_mlmi` |
 | Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
