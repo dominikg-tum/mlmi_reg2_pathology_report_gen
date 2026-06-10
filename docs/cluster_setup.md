@@ -325,14 +325,16 @@ ls /mnt/projects/mlmi/reg2/repos/         # TITAN, Patho-R1, quilt-llava, …
 grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 ```
 
+**Only these five weight dirs exist today** — verify with `ls /mnt/projects/mlmi/reg2/models/`:
+
 | Asset | Path | Role |
 |---|---|---|
-| **Qwen2.5-VL-7B-Instruct** | `models/Qwen2.5-VL-7B-Instruct` *(download if missing)* | **Target Phase 1 VLM** — local `transformers` + INT8 (`bitsandbytes`) in enroot |
-| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | Interim VLM — vLLM API for WP3 extraction + wiring smoke tests |
-| **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Larger upper-bound baseline |
-| **InternVL3_5-8B** | `models/InternVL3_5-8B` | Phase 1 LoRA substrate + zero-shot ablation (see [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2)) |
+| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | **Default Phase 1 VLM** — vLLM (`start_qwen_server.sh`) + HF agent path |
+| **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Phase 1 upper-bound eval (2× GPU) |
+| **InternVL3_5-8B** | `models/InternVL3_5-8B` | Phase 1 ablation + LoRA substrate |
 | **InternVL3_5-14B** | `models/InternVL3_5-14B` | Phase 1 upper-bound ablation (2× GPU) |
-| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | Phase 2 report LLM candidate — **not** Phase 1 node answerer |
+| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | **Default Phase 2 report LLM** — not Phase 1 node answerer |
+| **PathChat+** | *(not staged)* | **TODO** — scientific Phase 1 target; see [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos) |
 | **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
 | **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
 
@@ -352,14 +354,14 @@ SLURM scripts `source load_paths.sh` so container and model paths stay in sync w
 headers, `load_cluster_paths`, `enroot start --root --rw --mount /mnt:/mnt`, and logs under
 `dominik/logs/`.
 
-### 7.2 Phase 1 VLM — local Qwen2.5-VL-7B (target)
+### 7.2 Phase 1 VLM — Qwen3-VL-8B-Instruct (current default)
 
-The **graph traversal inference loop** loads **Qwen2.5-VL-7B-Instruct** directly inside enroot via HuggingFace `transformers` — not a long-lived vLLM server. This keeps GPU memory predictable when reloading models between Phase 1 and Phase 2.
+The staged default for graph node answering is **Qwen3-VL-8B-Instruct** (`models/Qwen3-VL-8B-Instruct`). WP3 extraction and the agent loop both use this weight dir today.
 
-| Mode | When | How |
+| Path | When | How |
 |------|------|-----|
-| **INT8 (preferred)** | 1× A100-40G or tight VRAM | `load_in_8bit=True` via `bitsandbytes` — already in team container deps |
-| **FP16 fallback** | INT8 load fails or quality regression | Standard `torch.float16` inference |
+| **vLLM server** | WP3 batch extraction, smoke tests, shared API | `sbatch scripts/cluster/start_qwen_server.sh` |
+| **HF `transformers`** | Phase 1 agent loop (multi-image patches per node) | Wire in `agent/backends.py` — load from `configs/paths.yaml` → `qwen.model_path` |
 
 Pattern (inside `srun` + enroot):
 
@@ -369,26 +371,18 @@ srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
 enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
 cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 
-# Phase 1 agent — local backend (to be wired in agent/backends.py)
 python -m baselines.run_agent \
-  --backend qwen_local \
+  --backend qwen \
   --visual patch_retrieve \
   --retriever graph_guided \
   --slide-id CASE.svs
 ```
 
-Download weights once if not present:
+**Alternatives on disk:** InternVL3.5-8B (ablation / LoRA), Qwen3-VL-30B (upper bound, 2× GPU). **PathChat+** is not staged — deploy steps in [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos).
 
-```bash
-huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
-  --local-dir /mnt/projects/mlmi/reg2/models/Qwen2.5-VL-7B-Instruct
-```
+### 7.3 Qwen via vLLM (WP3 + Phase 1 API path)
 
-Record the path in `configs/paths.yaml` under `models:` when confirmed.
-
-### 7.3 Qwen via vLLM (WP3 extraction — interim)
-
-WP3 report-parts extraction and early wiring still use [vLLM](https://docs.vllm.ai/) with **Qwen3-VL-8B** inside enroot. This is **not** the target Phase 1 inference path — see §7.2.
+[vLLM](https://docs.vllm.ai/) with **Qwen3-VL-8B** inside enroot — paths from `configs/paths.yaml`.
 
 #### Check if a server is already running
 
@@ -601,8 +595,9 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 | Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp yourname_mlmi` |
 | Export container | `enroot export --force --output .../yourname_$(date +%Y%m%d)_base.sqsh yourname_mlmi` |
 | Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
-| Start Qwen vLLM (WP3 interim) | `sbatch scripts/cluster/start_qwen_server.sh` |
-| Phase 1 agent (target) | Local Qwen2.5-VL-7B in enroot — see §7.2 |
+| Phase 1 VLM (default) | Qwen3-VL-8B — vLLM: `sbatch scripts/cluster/start_qwen_server.sh` — see §7.2 |
+| Phase 2 report LLM | MedGemma 1.5 4B — `models/medgemma-1.5-4b-it` |
+| Deploy PathChat+ | TODO — [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos) |
 | Test Qwen client | `python extraction/qa_extractor.py` |
 | WP3 extraction | `python extraction/extract_report_parts.py` |
 | Explore WSI (batch) | `sbatch scripts/cluster/explore_data.sh` |
