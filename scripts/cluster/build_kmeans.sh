@@ -28,6 +28,8 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
     pip install -q pyyaml scikit-learn numpy torch 2>/dev/null || true
     python -m scripts.vision.build_kmeans_index \
       --wsi-index '${SLURM_ARRAY_TASK_ID}' \
-      --level medium \
-      --level high
+      --level 5x \
+      --level 10x \
+      --level 20x \
+      --level 40x
   "

@@ -1,15 +1,21 @@
 #!/bin/bash
-#SBATCH --job-name=wsi-tile
+#SBATCH --job-name=pathology-phase2-report
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=04:00:00
-#SBATCH --array=0-219
-#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/tile_%A_%a.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/tile_%A_%a.err
+#SBATCH --time=02:00:00
+#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/phase2_%j.out
+#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/phase2_%j.err
 
 set -euo pipefail
+
+SLIDE_ID="${1:-}"
+if [[ -z "${SLIDE_ID}" ]]; then
+  echo "Usage: sbatch run_phase2.sh CASE.svs" >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=load_paths.sh
@@ -25,11 +31,6 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q openslide-python pillow pyyaml tqdm 2>/dev/null || true
-    python -m scripts.vision.tile_slides \
-      --wsi-index '${SLURM_ARRAY_TASK_ID}' \
-      --level 5x \
-      --level 10x \
-      --level 20x \
-      --level 40x
+    pip install -q pyyaml transformers torch huggingface_hub 2>/dev/null || true
+    python -m scripts.inference.run_phase2 --slide-id '${SLIDE_ID}'
   "

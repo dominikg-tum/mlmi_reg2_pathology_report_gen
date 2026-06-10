@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=wsi-encode
+#SBATCH --job-name=wsi-offline-pipeline
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=04:00:00
+#SBATCH --time=06:00:00
 #SBATCH --array=0-219
-#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/encode_%A_%a.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/encode_%A_%a.err
+#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.out
+#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.err
 
 set -euo pipefail
 
@@ -26,14 +26,10 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q openslide-python pillow pyyaml tqdm transformers torch huggingface_hub 2>/dev/null || true
+    pip install -q openslide-python pillow pyyaml tqdm transformers torch huggingface_hub scikit-learn 2>/dev/null || true
     if [[ -n \"\${HF_TOKEN:-}\" ]]; then
       huggingface-cli login --token \"\${HF_TOKEN}\" 2>/dev/null || true
     fi
-    python -m scripts.vision.encode_patches_offline \
-      --wsi-index '${SLURM_ARRAY_TASK_ID}' \
-      --level 5x \
-      --level 10x \
-      --level 20x \
-      --level 40x
+    python -m scripts.preprocess.run_offline_wsi \
+      --wsi-index '${SLURM_ARRAY_TASK_ID}'
   "
