@@ -23,6 +23,8 @@ cluster = [
     "openslide-python>=1.3",
     "tqdm>=4.66",
     "huggingface_hub>=0.23",
+    "einops>=0.7",
+    "einops-exts>=0.0.4",
 ]
 
 [tool.pytest.ini_options]

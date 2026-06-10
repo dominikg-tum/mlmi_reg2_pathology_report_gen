@@ -28,7 +28,7 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q openslide-python pillow pyyaml tqdm transformers torch huggingface_hub 2>/dev/null || true
+$(cluster_titan_pip_snippet)
 $(cluster_hf_login_snippet)
     ARGS=(python -m scripts.vision.encode_slide_embeddings --max-patches '${MAX_PATCHES}')
     [[ -n '${SLIDE}' ]] && ARGS+=(--slide '${SLIDE}')

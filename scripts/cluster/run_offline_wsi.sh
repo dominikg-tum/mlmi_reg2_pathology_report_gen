@@ -27,7 +27,7 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q openslide-python pillow pyyaml tqdm transformers torch huggingface_hub scikit-learn 2>/dev/null || true
+$(cluster_offline_pip_snippet)
 $(cluster_hf_login_snippet)
     python -m scripts.preprocess.run_offline_wsi \
       --wsi-index '${SLURM_ARRAY_TASK_ID}'
