@@ -10,7 +10,7 @@ from agent.correction import check_consistency, should_retry
 from agent.memory import CaseMemory, GraphStore, JsonGraphStore
 from agent.types import Step
 from graph import GRAPH, ROOT_ID, Node
-from graph.schema import InteractionType
+from graph.schema import InteractionType, NodeKind
 from retrieval.base import PatchRetriever, get_retriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
@@ -46,6 +46,9 @@ def traverse(
     wsi_data_dir: Path | None = None,
     max_steps: int = 64,
     confidence_threshold: float = 0.65,
+    skip_report_nodes: bool = False,
+    search_all_patches: bool = False,
+    retrieval_log: list[dict[str, Any]] | None = None,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
@@ -57,6 +60,7 @@ def traverse(
 
         _encoder = TitanEncoder()
         retriever_kwargs["text_encoder"] = _encoder.encode_text
+        retriever_kwargs["search_all_patches"] = search_all_patches
     retriever: PatchRetriever | None = get_retriever(retriever_method, **retriever_kwargs)
     navigator = get_navigator(
         navigator_method,
@@ -70,6 +74,9 @@ def traverse(
     steps: list[Step] = []
 
     for _ in range(max_steps):
+        if skip_report_nodes and node.node_kind == NodeKind.REPORT:
+            break
+
         query = build_query(node, steps)
         visual_bundle: VisualBundle = navigator.select_visual_bundle(
             node,
@@ -78,6 +85,17 @@ def traverse(
             query=query,
             retriever=retriever if node.needs_patch_retrieval() else None,
         )
+        if retrieval_log is not None:
+            patches_meta = visual_bundle.metadata.get("retrieved_patches")
+            if patches_meta:
+                retrieval_log.append(
+                    {
+                        "node_id": node.id,
+                        "zoom_level": node.mag_band,
+                        "query": node.retrieval_text,
+                        "patches": patches_meta,
+                    }
+                )
         extra = mem.retrieve_context(node, query)
         answer, confidence = backend.answer(
             node, visual_bundle, steps, extra_context=extra
@@ -105,23 +123,36 @@ def traverse(
 
         if next_id is None:
             break
-        node = store.get_node(next_id)
+        next_node = store.get_node(next_id)
+        if skip_report_nodes and next_node.node_kind == NodeKind.REPORT:
+            break
+        node = next_node
     else:
         raise RuntimeError(f"traversal exceeded {max_steps} steps (cycle?)")
 
     return steps
 
 
-def chain_to_dict(steps: list[Step], slide_id: str = "") -> dict[str, Any]:
+def chain_to_dict(
+    steps: list[Step],
+    slide_id: str = "",
+    *,
+    include_report: bool = True,
+) -> dict[str, Any]:
+    report = ""
+    if include_report and steps:
+        report = steps[-1].answer
     return {
         "slide_id": slide_id,
         "chain-of-thought": [
             {
+                "node_id": s.node_id,
                 "question": s.question,
                 "answer": s.answer,
                 "next_question": s.next_question,
             }
             for s in steps
         ],
-        "report": steps[-1].answer if steps else "",
+        "node_path": [s.node_id for s in steps],
+        "report": report,
     }
