@@ -18,6 +18,7 @@ from scripts.vision._common import (
     default_retrieval_config,
     default_titan_model,
     load_vision_config,
+    load_coords_from_pt,
     slide_log_path,
     tiling_verified_flag,
 )
@@ -56,8 +57,7 @@ def _encode_one(
         return
 
     if coord_path.exists():
-        raw = torch.load(coord_path, map_location="cpu", weights_only=False)
-        coords = [tuple(int(x), int(y)) for x, y in np.asarray(raw)]
+        coords = load_coords_from_pt(coord_path)
         if max_patches > 0:
             coords = coords[:max_patches]
         patches = load_patches_from_coords(svs_path, coords, mag_band=level)

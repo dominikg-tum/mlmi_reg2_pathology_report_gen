@@ -14,6 +14,7 @@ from PIL import Image
 from scripts.vision._common import (
     default_cache_root,
     load_vision_config,
+    load_coords_from_pt,
     tiling_verified_flag,
 )
 from vision.cache import slide_cache_dir
@@ -56,8 +57,7 @@ def verify_slide(
     meta_path = out_dir / f"meta_{level}.json"
 
     if coord_path.exists():
-        coords = torch.load(coord_path, map_location="cpu", weights_only=False)
-        coords = [(int(x), int(y)) for x, y in np.asarray(coords)]
+        coords = load_coords_from_pt(coord_path)
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     else:
         coords, patch_size_lv0 = extract_patch_coords(svs_path, mag_band=level)

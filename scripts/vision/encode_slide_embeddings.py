@@ -19,11 +19,12 @@ from scripts.vision._common import (
     default_data_dir,
     default_titan_model,
     load_vision_config,
+    resolve_offline_svs_files,
 )
 from vision.cache import slide_cache_dir
 from vision.encoders.titan import TitanEncoder
 from vision.patching import extract_patches
-from vision.wsi_io import find_svs_files, slide_id_from_path, write_thumbnail
+from vision.wsi_io import slide_id_from_path, write_thumbnail
 
 
 def _save_evidence_patches(
@@ -61,7 +62,12 @@ def encode_one_slide(
     sid = slide_id_from_path(svs_path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if write_thumb:
+    slide_emb_path = out_dir / "slide_embedding.pt"
+    if slide_emb_path.exists():
+        print(f"SKIP {sid} (slide_embedding.pt exists)")
+        return
+
+    if write_thumb and not (out_dir / "thumbnail.png").exists():
         write_thumbnail(svs_path, out_dir / "thumbnail.png", max_edge_px=max_edge_px)
 
     patches, coords, patch_size_lv0 = extract_patches(
@@ -116,6 +122,7 @@ def main() -> None:
     parser.add_argument("--model-id", type=str, default=None)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--slide", type=str, default="")
+    parser.add_argument("--wsi-index", type=int, default=None)
     parser.add_argument("--max-patches", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--no-thumbnail", action="store_true")
@@ -130,10 +137,12 @@ def main() -> None:
     batch_size = args.batch_size or int(titan_cfg.get("batch_size", 32))
     max_edge = int(vcfg.get("thumbnail", {}).get("max_edge_px", 1024))
 
-    if args.slide:
-        svs_files = list(data_dir.rglob(args.slide))
-    else:
-        svs_files = find_svs_files(data_dir, limit=args.limit)
+    if args.slide and args.wsi_index is not None:
+        raise SystemExit("Provide only one of --slide or --wsi-index")
+
+    svs_files = resolve_offline_svs_files(
+        data_dir, slide=args.slide, limit=args.limit, wsi_index=args.wsi_index
+    )
 
     if not svs_files:
         raise SystemExit(f"No .svs files under {data_dir}")
