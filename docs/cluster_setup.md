@@ -40,7 +40,7 @@ are older copies; prefer `extraction/` in the repo and outputs under `data/` (se
 
 1. **Never run heavy commands on the head node** — always start a SLURM job first (`srun` or `sbatch`).
 2. **Always run GPU work inside enroot** — model load, offline encode, Phase 1/2 inference, and eval jobs mount `/mnt` and use the container from `configs/paths.yaml` → `user.container_sqsh`.
-3. **Cursor / VS Code SSH must NOT request a GPU** — use `scripts/cluster/start_cursor_ssh.sh` (CPU only). Do **not** use `/mnt/general/examples/ssh.sh` (it sets `--gres=gpu:1` and triggers idle-GPU auto-cancel warnings).
+3. **Cursor / VS Code SSH must NOT request a GPU** — use `scripts/cluster/start_cursor_ssh.sh` on **`12g`**, CPU only. Do **not** use `/mnt/general/examples/ssh.sh` (GPU + idle cancel). Do **not** use **`24g`** for a GPU-less editor job (24g auto-cancels jobs with no GPU use after 2 h).
 4. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
 5. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
 6. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
@@ -190,8 +190,7 @@ Cursor uses the same Remote SSH flow as VS Code.
 Cursor is an editor session and keeps the GPU at 0% util; the scheduler may auto-cancel
 after ~2 hours and wastes a GPU slot that preprocessing jobs need.
 
-Use the repo script instead (no `--gres=gpu`, no `--cpus-per-task` — the `24g`
-partition rejects manual CPU requests):
+Use the repo script instead (`12g` partition, no `--gres=gpu`):
 
 ```bash
 cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
