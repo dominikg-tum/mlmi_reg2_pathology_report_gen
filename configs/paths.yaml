@@ -2,7 +2,7 @@
 
 cluster:
   project_root: /mnt/projects/mlmi/reg2
-  data_dir: /mnt/projects/mlmi/reg2/TUMUntera
+  data_dir: /mnt/projects/mlmi/TUMUntera/TUM_Untera_data
   labels_xlsx: /mnt/projects/mlmi/reg2/case_reports_to_korea_collaborators.xlsx
   models_dir: /mnt/projects/mlmi/reg2/models
   containers_dir: /mnt/projects/mlmi/reg2/containers
