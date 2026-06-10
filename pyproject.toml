@@ -19,7 +19,7 @@ dev = [
 # Install on cluster inside dominik_20260529_base (or via enroot) for GPU jobs
 cluster = [
     "torch>=2.0",
-    "transformers>=4.40",
+    "transformers>=4.40,<5.0",
     "openslide-python>=1.3",
     "tqdm>=4.66",
     "huggingface_hub>=0.23",

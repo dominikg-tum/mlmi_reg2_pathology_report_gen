@@ -57,17 +57,17 @@ fi
 EOF
 }
 
-# Pip deps for offline WSI jobs (TITAN/CONCH needs einops-exts at model load).
+# Pip deps for offline WSI jobs (TITAN/CONCH: transformers>=5 breaks trust_remote_code models).
 cluster_offline_pip_snippet() {
   cat <<'EOF'
-pip install -q openslide-python pillow pyyaml tqdm transformers torch huggingface_hub scikit-learn einops einops-exts 2>/dev/null || true
+pip install -q 'transformers>=4.40,<5.0' openslide-python pillow pyyaml tqdm torch huggingface_hub scikit-learn einops einops-exts 2>/dev/null || true
 EOF
 }
 
 # Lighter pip set for encode-only GPU jobs.
 cluster_titan_pip_snippet() {
   cat <<'EOF'
-pip install -q openslide-python pillow pyyaml tqdm transformers torch huggingface_hub einops einops-exts 2>/dev/null || true
+pip install -q 'transformers>=4.40,<5.0' openslide-python pillow pyyaml tqdm torch huggingface_hub einops einops-exts 2>/dev/null || true
 EOF
 }
 
