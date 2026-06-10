@@ -14,7 +14,7 @@ ls /mnt/projects/mlmi/reg2
 
 | Path | Contents |
 |---|---|
-| `TUMUntera/` | WSI dataset (`.svs` files) |
+| `TUMUntera/TUM_Untera_data/` | WSI dataset (`.svs` files) — canonical path in `configs/paths.yaml` → `cluster.data_dir` |
 | `containers/` | Pre-built `.sqsh` images (`qwen25_graphrag.sqsh` = GraphRAG team base) |
 | `repos/` | Git repositories — **clone this project here** |
 | `reg2_repo/` | Legacy folder — **do not** put `mlmi_reg2_pathology_report_gen` here |
@@ -39,9 +39,10 @@ are older copies; prefer `extraction/` in the repo and outputs under `data/` (se
 ## 2. Golden Rules
 
 1. **Never run heavy commands on the head node** — always start a SLURM job first (`srun` or `sbatch`).
-2. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
-3. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
-4. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
+2. **Always run GPU work inside enroot** — model load, offline encode, Phase 1/2 inference, and eval jobs mount `/mnt` and use the container from `configs/paths.yaml` → `user.container_sqsh`.
+3. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
+4. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
+5. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
 
 ---
 
@@ -318,23 +319,24 @@ the live model name / port with teammates.
 ### 7.1 What's deployed where
 
 ```bash
-ls /mnt/projects/mlmi/reg2/containers/    # team + personal .sqsh exports (§3.0)
-ls /mnt/projects/mlmi/reg2/models/        # local model weights (§3.0)
+ls /mnt/projects/mlmi/reg2/containers/    # team + personal .sqsh exports
+ls /mnt/projects/mlmi/reg2/models/        # local model weights (table below)
 ls /mnt/projects/mlmi/reg2/repos/         # TITAN, Patho-R1, quilt-llava, …
 grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 ```
 
 | Asset | Path | Role |
 |---|---|---|
-| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | MVP VLM — default in `configs/paths.yaml` and `start_qwen_server.sh` |
+| **Qwen2.5-VL-7B-Instruct** | `models/Qwen2.5-VL-7B-Instruct` *(download if missing)* | **Target Phase 1 VLM** — local `transformers` + INT8 (`bitsandbytes`) in enroot |
+| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | Interim VLM — vLLM API for WP3 extraction + wiring smoke tests |
 | **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Larger upper-bound baseline |
-| **InternVL3_5-8B** | `models/InternVL3_5-8B` | LoRA fine-tune candidate |
-| **InternVL3_5-14B** | `models/InternVL3_5-14B` | LoRA fine-tune candidate |
-| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | Small medical VLM baseline |
+| **InternVL3_5-8B** | `models/InternVL3_5-8B` | Phase 1 LoRA substrate + zero-shot ablation (see [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2)) |
+| **InternVL3_5-14B** | `models/InternVL3_5-14B` | Phase 1 upper-bound ablation (2× GPU) |
+| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | Phase 2 report LLM candidate — **not** Phase 1 node answerer |
 | **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
 | **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
 
-Full on-disk inventory: [§3.0](#30-shared-containers--models-inventory). Paths in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
+Phase 1 vs Phase 2 roles and verdicts: [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2). Paths in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
 
 Repo scripts live under `scripts/cluster/`:
 
@@ -350,10 +352,43 @@ SLURM scripts `source load_paths.sh` so container and model paths stay in sync w
 headers, `load_cluster_paths`, `enroot start --root --rw --mount /mnt:/mnt`, and logs under
 `dominik/logs/`.
 
-### 7.2 Qwen via vLLM (generative VLM / text)
+### 7.2 Phase 1 VLM — local Qwen2.5-VL-7B (target)
 
-The cluster has **no public LLM API**. Models are served locally with
-[vLLM](https://docs.vllm.ai/) inside enroot.
+The **graph traversal inference loop** loads **Qwen2.5-VL-7B-Instruct** directly inside enroot via HuggingFace `transformers` — not a long-lived vLLM server. This keeps GPU memory predictable when reloading models between Phase 1 and Phase 2.
+
+| Mode | When | How |
+|------|------|-----|
+| **INT8 (preferred)** | 1× A100-40G or tight VRAM | `load_in_8bit=True` via `bitsandbytes` — already in team container deps |
+| **FP16 fallback** | INT8 load fails or quality regression | Standard `torch.float16` inference |
+
+Pattern (inside `srun` + enroot):
+
+```bash
+srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
+
+enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+
+# Phase 1 agent — local backend (to be wired in agent/backends.py)
+python -m baselines.run_agent \
+  --backend qwen_local \
+  --visual patch_retrieve \
+  --retriever graph_guided \
+  --slide-id CASE.svs
+```
+
+Download weights once if not present:
+
+```bash
+huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
+  --local-dir /mnt/projects/mlmi/reg2/models/Qwen2.5-VL-7B-Instruct
+```
+
+Record the path in `configs/paths.yaml` under `models:` when confirmed.
+
+### 7.3 Qwen via vLLM (WP3 extraction — interim)
+
+WP3 report-parts extraction and early wiring still use [vLLM](https://docs.vllm.ai/) with **Qwen3-VL-8B** inside enroot. This is **not** the target Phase 1 inference path — see §7.2.
 
 #### Check if a server is already running
 
@@ -435,10 +470,9 @@ OpenAI-compatible endpoint with guided decoding.
 > `hostname` inside the server job) and ensure both jobs landed on the same node,
 > or run client + server in the same `srun` session.
 
-### 7.3 TITAN (retrieval encoder — not a chat server)
+### 7.4 TITAN / CONCH (retrieval encoder — not a chat server)
 
-TITAN is a **frozen encoder**, not a generative API. You load weights from
-`repos/TITAN` and run batch encoding jobs — no vLLM, no port.
+TITAN + CONCH are **frozen encoders** loaded through one checkpoint (`MahmoodLab/TITAN`). Use `TitanEncoder.return_conch()` for offline patch encoding and `TitanEncoder.encode_text()` for retrieval queries — no separate CONCH HF loader, no vLLM, no port.
 
 Intended pipeline (WP2):
 
@@ -475,9 +509,15 @@ chmod 777 /mnt/projects/mlmi/reg2/dominik/embeddings
 
 See [`docs/PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) for the full TITAN wiring checklist.
 
-### 7.4 Other deployed models (Patho-R1, InternVL, MedGemma)
+### 7.5 Other deployed models (InternVL, MedGemma, Patho-R1)
 
-Same general pattern applies:
+| Model | Serve pattern | Project role |
+|---|---|---|
+| **InternVL3.5-8B / 14B** | HuggingFace `transformers` (multi-image batch in script) | Phase 1 node VLM — LoRA fine-tune target; 14B needs 2× GPU |
+| **medgemma-1.5-4b-it** | HF or vLLM (test which fits) | Phase 2 report LLM — **not** per-patch node Q&A |
+| **Patho-R1** | Batch inference from `repos/Patho-R1` | Reasoning baseline / CoT supervision |
+
+General steps:
 
 | Step | Action |
 |---|---|
@@ -487,11 +527,13 @@ Same general pattern applies:
 | 4 | Record model path + port in `configs/paths.yaml` |
 | 5 | Expose as an `AnswerBackend` in `agent/backends.py` or `baselines/run_agent.py` |
 
-For HuggingFace-style models, the team container already has PyTorch + transformers.
-For vLLM-served models, copy `start_qwen_server.sh` and point `qwen.model_path` in
+For HuggingFace-style models (InternVL, MedGemma), the team container already has PyTorch + transformers.
+For vLLM-served models (Qwen3-VL), copy `start_qwen_server.sh` and point `qwen.model_path` in
 `paths.yaml` at another entry under `models:` (+ adjust GPU count in the script).
 
-### 7.5 SLURM script checklist (repo convention)
+Model selection rationale: [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2).
+
+### 7.6 SLURM script checklist (repo convention)
 
 When adding `scripts/cluster/my_job.sh`:
 
@@ -559,7 +601,8 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 | Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp yourname_mlmi` |
 | Export container | `enroot export --force --output .../yourname_$(date +%Y%m%d)_base.sqsh yourname_mlmi` |
 | Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
-| Start Qwen (vLLM) | `sbatch scripts/cluster/start_qwen_server.sh` |
+| Start Qwen vLLM (WP3 interim) | `sbatch scripts/cluster/start_qwen_server.sh` |
+| Phase 1 agent (target) | Local Qwen2.5-VL-7B in enroot — see §7.2 |
 | Test Qwen client | `python extraction/qa_extractor.py` |
 | WP3 extraction | `python extraction/extract_report_parts.py` |
 | Explore WSI (batch) | `sbatch scripts/cluster/explore_data.sh` |
