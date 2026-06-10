@@ -16,7 +16,7 @@ class PatchRetriever(Protocol):
         query: str,
         slide_cache: SlideCache,
         *,
-        level: str = "high",
+        level: str = "20x",
         k: int = 3,
         exclude: set[int] | None = None,
     ) -> list["RetrievedPatch"]: ...

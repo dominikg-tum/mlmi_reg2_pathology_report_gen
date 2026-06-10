@@ -4,7 +4,7 @@ Phases **1, 2, 4** only (no Phase 3 / ABMIL).
 
 | Phase | Capability |
 |-------|------------|
-| **1** | CONCHv1.5 embeddings + TITAN text cosine sim over K=100 K-means centroids + graph-tier zoom (`medium`=×10, `high`=×20) |
+| **1** | CONCHv1.5 at **5×/10×/20×/40×** (variable native patch px → 224 CONCH input) → `patch_embeddings_{zoom}.pt`; CONCH text×vision cosine; `node.zoom_level` + `description` |
 | **2** | Adjacent-scale ×10 parent for each ×20 patch (geometry via `coords_medium.pt`) |
 | **4** | Spatial diversity filter (`d_min_20x_px` from `configs/vision.yaml`) |
 
@@ -38,4 +38,4 @@ python -m baselines.run_agent \
   --slide-id YOUR.svs
 ```
 
-`graph_guided` passes `node.retrieval_level` to the inner `TitanCosineRetriever`.
+`graph_guided` passes `node.zoom_level` → `embeddings_{band}.pt` (separate pool per magnification; not a flat pool).

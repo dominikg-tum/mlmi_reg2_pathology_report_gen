@@ -90,9 +90,9 @@ class ThumbnailProvider:
                     slide_cache, wsi_path=self.wsi_path, wsi_data_dir=self.wsi_data_dir
                 )
                 retrieved = retriever.retrieve(
-                    query,
+                    node.retrieval_text,
                     slide_cache,
-                    level=node.retrieval_level_str,
+                    level=node.mag_band,
                     wsi_path=wsi,
                     return_images=wsi is not None,
                 )
@@ -140,9 +140,9 @@ class PatchRetrieveProvider:
             slide_cache, wsi_path=self.wsi_path, wsi_data_dir=self.wsi_data_dir
         )
         retrieved = retriever.retrieve(
-            query,
+            node.retrieval_text,
             slide_cache,
-            level=node.retrieval_level_str,
+            level=node.mag_band,
             wsi_path=wsi,
             return_images=wsi is not None,
         )

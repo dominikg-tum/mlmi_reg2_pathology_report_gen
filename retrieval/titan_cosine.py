@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from vision.cache import SlideCache
-from vision.mag_config import retrieval_config
+from vision.mag_config import normalize_zoom, retrieval_config, top_k_for_zoom
 from vision.wsi_io import find_parent_patch_index, load_patch_at_coord
 
 
@@ -95,13 +95,14 @@ class TitanCosineRetriever:
         query: str,
         slide_cache: SlideCache,
         *,
-        level: str = "high",
+        level: str = "20x",
         k: int | None = None,
         exclude: set[int] | None = None,
         wsi_path: Path | None = None,
         return_images: bool = True,
     ) -> list[RetrievedPatch]:
-        k = k if k is not None else self.top_k
+        level = normalize_zoom(level)
+        k = k if k is not None else top_k_for_zoom(level)
         slide = self._load_embeddings(slide_cache, level)
         centroid_idx = self._load_centroid_indices(slide_cache, level)
 
@@ -124,11 +125,11 @@ class TitanCosineRetriever:
 
         parent_coords_medium: np.ndarray | None = None
         ps_medium = 0
-        if level == "high":
-            medium = self._load_embeddings(slide_cache, "medium")
+        if level == "20x":
+            medium = self._load_embeddings(slide_cache, "10x")
             parent_coords_medium = medium.coords
             ps_medium = medium.patch_size_lv0 or self._load_meta_patch_size(
-                slide_cache, "medium"
+                slide_cache, "10x"
             )
 
         results: list[RetrievedPatch] = []
@@ -140,7 +141,7 @@ class TitanCosineRetriever:
             parent_index = None
             parent_image = None
 
-            if level == "high" and parent_coords_medium is not None and ps_medium > 0:
+            if level == "20x" and parent_coords_medium is not None and ps_medium > 0:
                 parent_index = find_parent_patch_index(
                     coord,
                     parent_coords_medium,
@@ -161,7 +162,7 @@ class TitanCosineRetriever:
                     wsi_path, coord, objective=objective, patch_size=patch_size
                 )
                 if parent_coord is not None:
-                    obj_m, ps_m = mag_band_config("medium")
+                    obj_m, ps_m = mag_band_config("10x")
                     parent_image = load_patch_at_coord(
                         wsi_path, parent_coord, objective=obj_m, patch_size=ps_m
                     )
@@ -189,7 +190,7 @@ class TitanCosineRetriever:
         k: int,
         patch_size_lv0: int,
     ) -> list[int]:
-        d_min = float(self.d_min_20x if level == "high" else self.d_min_20x * 2)
+        d_min = float(self.d_min_20x if level == "20x" else self.d_min_20x * 2)
         accepted: list[int] = []
         half = patch_size_lv0 / 2.0
         centres = coords.astype(np.float64) + half

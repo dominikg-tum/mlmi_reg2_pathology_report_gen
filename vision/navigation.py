@@ -23,7 +23,7 @@ class MagnificationNavigator(Protocol):
 
 
 class GraphGuidedNavigator:
-    """Uses node.retrieval_level + visual_policy (graph-as-MST)."""
+    """Uses node.zoom_level + visual_policy (graph-as-MST)."""
 
     def __init__(
         self,

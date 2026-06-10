@@ -1,4 +1,4 @@
-"""Graph-guided retrieval: maps node.retrieval_level → offline cache band."""
+"""Graph-guided retrieval: maps node.zoom_level → magnification-specific patch pool."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ from pathlib import Path
 from retrieval.base import PatchRetriever
 from retrieval.titan_cosine import RetrievedPatch
 from vision.cache import SlideCache
+from vision.mag_config import top_k_for_zoom
 
 
 class GraphGuidedRetriever:
-    """Delegates to inner retriever; level comes from the graph node."""
+    """Delegates to inner retriever; mag band comes from node.zoom_level (not a flat pool)."""
 
     def __init__(self, inner: PatchRetriever):
         self.inner = inner
@@ -20,12 +21,14 @@ class GraphGuidedRetriever:
         query: str,
         slide_cache: SlideCache,
         *,
-        level: str = "high",
-        k: int = 3,
+        level: str = "20x",
+        k: int | None = None,
         exclude: set[int] | None = None,
         wsi_path: Path | None = None,
         return_images: bool = True,
     ) -> list[RetrievedPatch]:
+        if k is None:
+            k = top_k_for_zoom(level)
         return self.inner.retrieve(
             query,
             slide_cache,
