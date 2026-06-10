@@ -30,6 +30,5 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
       --wsi-index '${SLURM_ARRAY_TASK_ID}' \
       --level 5x \
       --level 10x \
-      --level 20x \
-      --level 40x
+      --level 20x
   "

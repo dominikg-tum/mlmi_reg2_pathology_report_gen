@@ -9,13 +9,20 @@ from pathlib import Path
 import numpy as np
 
 from vision.cache import SlideCache
-from vision.mag_config import normalize_zoom, retrieval_config, top_k_for_zoom
+from vision.mag_config import (
+    include_grandparent,
+    mag_band_config,
+    normalize_zoom,
+    parent_zoom_for,
+    retrieval_config,
+    top_k_for_zoom,
+)
 from vision.wsi_io import find_parent_patch_index, load_patch_at_coord
 
 
 @dataclass
 class RetrievedPatch:
-    """One retrieved patch plus optional ×10 parent (Phase 2)."""
+    """One retrieved patch plus optional adjacent-scale ancestors (CMT enricher)."""
 
     patch_image: object | None
     parent_image: object | None
@@ -25,6 +32,11 @@ class RetrievedPatch:
     similarity: float
     index: int
     parent_index: int | None = None
+    parent_level: str | None = None
+    grandparent_image: object | None = None
+    grandparent_coord: tuple[int, int] | None = None
+    grandparent_index: int | None = None
+    grandparent_level: str | None = None
 
 
 @dataclass
@@ -98,6 +110,39 @@ class TitanCosineRetriever:
         indices = torch.load(path, map_location="cpu", weights_only=False)
         return np.asarray(indices, dtype=np.int64)
 
+    def _resolve_ancestor(
+        self,
+        coord: tuple[int, int],
+        slide_cache: SlideCache,
+        *,
+        child_level: str,
+        parent_level: str,
+        child_patch_size_lv0: int,
+    ) -> tuple[int, tuple[int, int]] | None:
+        parent = self._load_embeddings(slide_cache, parent_level)
+        ps_parent = parent.patch_size_lv0 or self._load_meta_patch_size(slide_cache, parent_level)
+        if ps_parent <= 0:
+            return None
+        parent_index = find_parent_patch_index(
+            coord,
+            parent.coords,
+            patch_size_lv0_high=child_patch_size_lv0,
+            patch_size_lv0_medium=ps_parent,
+        )
+        parent_coord = (
+            int(parent.coords[parent_index, 0]),
+            int(parent.coords[parent_index, 1]),
+        )
+        return parent_index, parent_coord
+
+    def _load_patch_image(
+        self, wsi_path: Path, coord: tuple[int, int], level: str
+    ) -> object:
+        objective, patch_size = mag_band_config(level)
+        return load_patch_at_coord(
+            wsi_path, coord, objective=objective, patch_size=patch_size
+        )
+
     def retrieve(
         self,
         query: str,
@@ -108,6 +153,8 @@ class TitanCosineRetriever:
         exclude: set[int] | None = None,
         wsi_path: Path | None = None,
         return_images: bool = True,
+        tier: str | None = None,
+        node_kind: str | None = None,
     ) -> list[RetrievedPatch]:
         level = normalize_zoom(level)
         k = k if k is not None else top_k_for_zoom(level)
@@ -137,14 +184,12 @@ class TitanCosineRetriever:
             order, pool_coords, level=level, k=k, patch_size_lv0=ps_lv0
         )
 
-        parent_coords_medium: np.ndarray | None = None
-        ps_medium = 0
-        if level == "20x":
-            medium = self._load_embeddings(slide_cache, "10x")
-            parent_coords_medium = medium.coords
-            ps_medium = medium.patch_size_lv0 or self._load_meta_patch_size(
-                slide_cache, "10x"
-            )
+        parent_level = parent_zoom_for(level)
+        want_grandparent = (
+            parent_level is not None
+            and include_grandparent(tier=tier, node_kind=node_kind)
+        )
+        grandparent_level = parent_zoom_for(parent_level) if want_grandparent else None
 
         results: list[RetrievedPatch] = []
         for local_i in accepted_local:
@@ -154,31 +199,46 @@ class TitanCosineRetriever:
             parent_coord = None
             parent_index = None
             parent_image = None
+            grandparent_coord = None
+            grandparent_index = None
+            grandparent_image = None
 
-            if level == "20x" and parent_coords_medium is not None and ps_medium > 0:
-                parent_index = find_parent_patch_index(
+            if parent_level is not None:
+                resolved = self._resolve_ancestor(
                     coord,
-                    parent_coords_medium,
-                    patch_size_lv0_high=ps_lv0,
-                    patch_size_lv0_medium=ps_medium,
+                    slide_cache,
+                    child_level=level,
+                    parent_level=parent_level,
+                    child_patch_size_lv0=ps_lv0,
                 )
-                parent_coord = (
-                    int(parent_coords_medium[parent_index, 0]),
-                    int(parent_coords_medium[parent_index, 1]),
-                )
+                if resolved is not None:
+                    parent_index, parent_coord = resolved
+                    if grandparent_level is not None:
+                        ps_parent = self._load_meta_patch_size(slide_cache, parent_level)
+                        if ps_parent <= 0:
+                            ps_parent = self._load_embeddings(
+                                slide_cache, parent_level
+                            ).patch_size_lv0
+                        gp = self._resolve_ancestor(
+                            parent_coord,
+                            slide_cache,
+                            child_level=parent_level,
+                            parent_level=grandparent_level,
+                            child_patch_size_lv0=ps_parent,
+                        )
+                        if gp is not None:
+                            grandparent_index, grandparent_coord = gp
 
             patch_image = None
             if return_images and wsi_path is not None:
-                from vision.mag_config import mag_band_config
-
-                objective, patch_size = mag_band_config(level)
-                patch_image = load_patch_at_coord(
-                    wsi_path, coord, objective=objective, patch_size=patch_size
-                )
-                if parent_coord is not None:
-                    obj_m, ps_m = mag_band_config("10x")
-                    parent_image = load_patch_at_coord(
-                        wsi_path, parent_coord, objective=obj_m, patch_size=ps_m
+                patch_image = self._load_patch_image(wsi_path, coord, level)
+                if parent_coord is not None and parent_level is not None:
+                    parent_image = self._load_patch_image(
+                        wsi_path, parent_coord, parent_level
+                    )
+                if grandparent_coord is not None and grandparent_level is not None:
+                    grandparent_image = self._load_patch_image(
+                        wsi_path, grandparent_coord, grandparent_level
                     )
 
             results.append(
@@ -191,6 +251,11 @@ class TitanCosineRetriever:
                     similarity=sim,
                     index=global_i,
                     parent_index=parent_index,
+                    parent_level=parent_level,
+                    grandparent_image=grandparent_image,
+                    grandparent_coord=grandparent_coord,
+                    grandparent_index=grandparent_index,
+                    grandparent_level=grandparent_level,
                 )
             )
         return results

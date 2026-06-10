@@ -2,7 +2,7 @@
 
 *For: Agentic Pathology Report Generation via VLMs (UTERUS graph + WSI)*
 
-**See also:** [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the locked target architecture and codebase audit.
+**See also:** [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the locked target architecture and codebase audit. [WSI_Background_Filtering.md](WSI_Background_Filtering.md) for tissue vs glass filtering during offline tiling.
 
 ---
 
@@ -63,7 +63,11 @@ d. answer = VLM(top_k_patches, node.question, HippoRAG_context)
    # current default: Qwen3-VL-8B-Instruct; ablation: InternVL3.5-8B
 ```
 
-Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`, `retrieval.kmeans_k`. Implemented via `GraphGuidedRetriever` + `node.retrieval_text` + `PatchRetrieveProvider`. Encoder decisions: [PROJECT_OVERVIEW.md §2b](PROJECT_OVERVIEW.md#2b-locked-architectural-decisions).
+Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`, `retrieval.kmeans_k`, `retrieval.adjacent_scale`. Implemented via `GraphGuidedRetriever` + `node.retrieval_text` + `PatchRetrieveProvider`. Encoder decisions: [PROJECT_OVERVIEW.md §2b](PROJECT_OVERVIEW.md#2b-locked-architectural-decisions).
+
+### Adjacent-scale enrichment (CMT)
+
+When `retrieval.adjacent_scale.enabled: true`, each retrieved patch also loads its **parent** tile from the next-coarser pool (`parent_map` in config). Integration/report nodes (`tier=integration` or `node_kind=integration|report`) additionally load a **grandparent**. Images are passed to the VLM alongside the primary patch — embedding-level fusion is not used.
 
 ### HippoRAG 2 (semantic memory, not patch retrieval)
 
@@ -85,6 +89,8 @@ WSI (.svs) under /mnt/projects/mlmi/TUMUntera/TUM_Untera_data
 
 Cluster scripts: `scripts/vision/tile_slides.py`, `encode_patches_offline.py`, `build_kmeans_index.py`, `encode_slide_embeddings.py`
 
+Tissue vs glass: current rule is grayscale mean ≤ 220 (`vision/wsi_io.py`). Recommended upgrade — slide-level HSV mask + minimum tissue fraction — documented in [WSI_Background_Filtering.md](WSI_Background_Filtering.md).
+
 ---
 
 ## 4. Method Overview Matrix
@@ -94,7 +100,7 @@ Cluster scripts: `scripts/vision/tile_slides.py`, `encode_patches_offline.py`, `
 | A | **CONCH cross-modal cosine** | Yes (4 pools) | Query + `description` via `encode_text()` | **Primary** — `TitanEncoder` single load |
 | B | **`zoom_level` routing** | Yes | Yes | **Primary path** |
 | C | **K-means centroid pool** | Yes | — | **Default on** (`kmeans_k=100`; optional full-pool search) |
-| D | **MMNavAgent CMT parent** | Yes | Partial | ×10 parent when tier=20× |
+| D | **MMNavAgent CMT parent** | Yes | Partial | Config `parent_map`: 40×→20×, 20×→10×, 10×→5×; grandparent on integration nodes |
 
 ---
 

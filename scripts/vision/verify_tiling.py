@@ -57,7 +57,7 @@ def verify_slide(
 
     if coord_path.exists():
         coords = torch.load(coord_path, map_location="cpu", weights_only=False)
-        coords = [tuple(int(x), int(y)) for x, y in np.asarray(coords)]
+        coords = [(int(x), int(y)) for x, y in np.asarray(coords)]
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     else:
         coords, patch_size_lv0 = extract_patch_coords(svs_path, mag_band=level)

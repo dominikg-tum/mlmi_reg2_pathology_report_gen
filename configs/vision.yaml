@@ -38,12 +38,20 @@ retrieval:
     20x: 5
     40x: 5
   d_min_20x_px: 512
-  # CONCH offline: four separate patch embedding pools per WSI (Phase 1 only).
+  # CMT-style adjacent-scale context at retrieval (dual images to VLM, no learned fusion).
+  adjacent_scale:
+    enabled: true
+    parent_map:
+      40x: 20x
+      20x: 10x
+      10x: 5x
+    grandparent_for_integration: true  # tier=integration or node_kind integration/report
+  # CONCH offline: patch embedding pools per WSI (Phase 1 only).
+  # 40x omitted for batch run — slow full-slide scan; add back when graph nodes need it.
   encode_levels:
     - 5x
     - 10x
     - 20x
-    - 40x
   # abmil_fallback: reserved — only if cosine sim shows systematic failures (not implemented)
 
 defaults:

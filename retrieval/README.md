@@ -5,7 +5,7 @@ Phases **1, 2, 4** only (no Phase 3 / ABMIL).
 | Phase | Capability |
 |-------|------------|
 | **1** | CONCHv1.5 at **5×/10×/20×/40×** (variable native patch px → 224 CONCH input) → `patch_embeddings_{zoom}.pt`; CONCH text×vision cosine; `node.zoom_level` + `description` |
-| **2** | Adjacent-scale ×10 parent for each ×20 patch (geometry via `coords_medium.pt`) |
+| **2** | Config-driven adjacent-scale parents (`40x→20x`, `20x→10x`, `10x→5x`); optional grandparent for integration/report nodes |
 | **4** | Spatial diversity filter (`d_min_20x_px` from `configs/vision.yaml`) |
 
 ## Offline pipeline (cluster order)

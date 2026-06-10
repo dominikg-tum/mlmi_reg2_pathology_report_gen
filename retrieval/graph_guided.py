@@ -26,6 +26,8 @@ class GraphGuidedRetriever:
         exclude: set[int] | None = None,
         wsi_path: Path | None = None,
         return_images: bool = True,
+        tier: str | None = None,
+        node_kind: str | None = None,
     ) -> list[RetrievedPatch]:
         if k is None:
             k = top_k_for_zoom(level)
@@ -37,4 +39,6 @@ class GraphGuidedRetriever:
             exclude=exclude,
             wsi_path=wsi_path,
             return_images=return_images,
+            tier=tier,
+            node_kind=node_kind,
         )

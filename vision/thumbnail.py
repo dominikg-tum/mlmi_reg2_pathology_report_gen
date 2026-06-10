@@ -43,6 +43,10 @@ def _bundle_from_retrieved(
             "coord": rp.coord,
             "parent_coord": rp.parent_coord,
             "parent_index": rp.parent_index,
+            "parent_level": rp.parent_level,
+            "grandparent_coord": rp.grandparent_coord,
+            "grandparent_index": rp.grandparent_index,
+            "grandparent_level": rp.grandparent_level,
             "similarity": rp.similarity,
         }
         if rp.patch_image is not None:
@@ -51,10 +55,17 @@ def _bundle_from_retrieved(
             paths.append(p)
             row["patch_path"] = str(p)
         if rp.parent_image is not None:
-            pp = out_dir / f"patch_{i}_parent_medium.png"
+            pl = rp.parent_level or "parent"
+            pp = out_dir / f"patch_{i}_parent_{pl}.png"
             rp.parent_image.save(pp)
             paths.append(pp)
             row["parent_patch_path"] = str(pp)
+        if rp.grandparent_image is not None:
+            gl = rp.grandparent_level or "grandparent"
+            gp = out_dir / f"patch_{i}_grandparent_{gl}.png"
+            rp.grandparent_image.save(gp)
+            paths.append(gp)
+            row["grandparent_patch_path"] = str(gp)
         meta_rows.append(row)
 
     bundle.patch_paths = paths
@@ -95,6 +106,8 @@ class ThumbnailProvider:
                     level=node.mag_band,
                     wsi_path=wsi,
                     return_images=wsi is not None,
+                    tier=node.tier.value,
+                    node_kind=node.node_kind.value,
                 )
                 patch_bundle = _bundle_from_retrieved(retrieved, slide_cache, out_subdir="retrieved_both")
                 bundle.patch_paths = patch_bundle.patch_paths
@@ -145,5 +158,7 @@ class PatchRetrieveProvider:
             level=node.mag_band,
             wsi_path=wsi,
             return_images=wsi is not None,
+            tier=node.tier.value,
+            node_kind=node.node_kind.value,
         )
         return _bundle_from_retrieved(retrieved, slide_cache)

@@ -82,3 +82,30 @@ def top_k_for_zoom(zoom: str) -> int:
     if zoom in by_zoom:
         return int(by_zoom[zoom])
     return int(rcfg.get("top_k", 5))
+
+
+_DEFAULT_PARENT_MAP = {"40x": "20x", "20x": "10x", "10x": "5x"}
+
+
+def adjacent_scale_config() -> dict:
+    return retrieval_config().get("adjacent_scale", {})
+
+
+def parent_zoom_for(level: str) -> str | None:
+    """Parent zoom tier for CMT adjacent-scale enrichment, or None at coarsest level."""
+    cfg = adjacent_scale_config()
+    if not cfg.get("enabled", True):
+        return None
+    parent_map = cfg.get("parent_map", _DEFAULT_PARENT_MAP)
+    parent = parent_map.get(normalize_zoom(level))
+    return normalize_zoom(parent) if parent else None
+
+
+def include_grandparent(*, tier: str | None = None, node_kind: str | None = None) -> bool:
+    """Whether to attach a second ancestor (parent's parent) for integration nodes."""
+    cfg = adjacent_scale_config()
+    if not cfg.get("grandparent_for_integration", True):
+        return False
+    tier_key = (tier or "").lower()
+    kind_key = (node_kind or "").lower()
+    return tier_key == "integration" or kind_key in ("integration", "report")

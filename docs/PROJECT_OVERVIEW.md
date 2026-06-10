@@ -6,6 +6,7 @@
 |-----------|---|
 | [cluster_setup.md](cluster_setup.md) | Garching SLURM, enroot, local VLM + vLLM (WP3) |
 | [WSI_Patching_Retrieval_Research.md](WSI_Patching_Retrieval_Research.md) | Patch retrieval methods & zoom routing |
+| [WSI_Background_Filtering.md](WSI_Background_Filtering.md) | Tissue vs glass filtering (offline tiling) |
 | [../README.md](../README.md) | Repo tree, quick start, owner lanes |
 
 ---
@@ -91,7 +92,7 @@ flowchart TD
 | Step | Spec | Artifact |
 |------|------|----------|
 | Thumbnail | `openslide` pyramid downsample, max edge 1024 px | `thumbnail.png` (**done** — `dataset/thumbnails/`) |
-| Multi-scale tiling | Non-overlapping patches at **four zoom levels** (native px → resize to 224×224 before CONCH): | `coords_{5x,10x,20x,40x}.pt`, `meta_{zoom}.json` |
+| Multi-scale tiling | Non-overlapping patches at **four zoom levels** (native px → resize to 224×224 before CONCH); **tissue filter:** mean grayscale ≤ 220 today — see [WSI_Background_Filtering.md](WSI_Background_Filtering.md) for planned upgrade | `coords_{5x,10x,20x,40x}.pt`, `meta_{zoom}.json` |
 | | **5×:** 2048×2048 → 224×224 | |
 | | **10×:** 1024×1024 → 224×224 | |
 | | **20×:** 512×512 → 224×224 | |
@@ -131,6 +132,8 @@ similarities = cosine_similarity(node_text_emb, patch_embeddings[tier])  # or ce
 top_k = top_k_for_zoom(tier)   # 3 @ 5×/10×; 5 @ 20×/40×
 top_k_patches = load_raw_patches(tier, top_k_indices)
 ```
+
+**c′. Adjacent-scale context (CMT enricher)** — for each retrieved patch, optionally attach coarser parent tiles per `retrieval.adjacent_scale.parent_map` in `configs/vision.yaml` (40×→20×, 20×→10×, 10×→5×). Integration/report nodes also receive a **grandparent** tile. Dual-scale images go to the VLM bundle; no learned fusion module.
 
 **d. VLM answer** — pass `top_k_patches` (raw images) + node question + HippoRAG context → **Qwen3-VL-8B-Instruct** (current default — vLLM or HF inside enroot); append to `cot_chain`; online-update HippoRAG 2. **Always run inside a container** — see [cluster_setup.md](cluster_setup.md) §3.
 
@@ -421,7 +424,7 @@ Two recent pathology-agent papers shape our design. We **do not** replicate eith
 |----------------------|--------------|
 | **Thumbnail as global anchor** before patch-level inspection | ✅ P1 baseline + optional `visual_policy: both` (thumbnail + retrieved patches) |
 | **Magnification should match question granularity** | ✅ **Primary path:** each node’s `zoom_level` (`4x`/`10x`/`20x`/`40x`) selects a separate pre-extracted CONCH pool via `GraphGuidedRetriever` — **graph-as-MST** |
-| **Cross-magnification context (CMT)** — fuse adjacent-scale features for the same region | ✅ **Shipped with graph-tier retrieval:** when retrieving at ×20, also load ×10 **parent patch** (`retrieval/titan_cosine.py`, `find_parent_patch_index`) |
+| **Cross-magnification context (CMT)** — fuse adjacent-scale features for the same region | ✅ **Config-driven adjacent-scale enricher:** `retrieval.adjacent_scale.parent_map` in `configs/vision.yaml` attaches parent patches for every adjacent tier (40×→20×, 20×→10×, 10×→5×); integration/report nodes also get a **grandparent** (`retrieval/titan_cosine.py`, `find_parent_patch_index`) |
 | **Navigation memory bank** of prior zoom/move steps | ✅ Partial analogue: episodic CoT + HippoRAG 2 (text memory, not spatial action log) |
 | **Trained MST policy** (slide-label supervision) | ❌ We have explicit graph tiers instead of learning zoom policy |
 | **Full MST ↔ CMT agent loop** | ❌ Too complex for 220-slide course project; hook stub in `vision/navigation.py` only |
