@@ -32,7 +32,7 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q pyyaml transformers torch huggingface_hub 2>/dev/null || true
+$(cluster_titan_pip_snippet)
 $(cluster_hf_login_snippet)
     python -m scripts.inference.run_phase2 --slide-id '${SLIDE_ID}'
   "
