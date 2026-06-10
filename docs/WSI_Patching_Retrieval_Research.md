@@ -14,7 +14,7 @@
 | Offline backbone | CONCHv1.5 (`MahmoodLab/CONCH`, 768-d) + TITAN slide encoder (`MahmoodLab/TITAN`, 1024-d) |
 | Tiling (locked) | **Four zoom levels**, non-overlapping native patch sizes → resize to **224×224** before CONCH encode |
 | Agent workflow | Graph Q&A → **`node.zoom_level`** → load `patch_embeddings_{tier}.pt` → **K-means centroid pool (default)** → `TitanEncoder.encode_text()` cosine → raw patches → VLM |
-| Report stage | **MedGemma 1.5 4B** or **Qwen2.5-7B-Instruct** + projected **TITAN slide embedding (@ ×20 only)** (Phase 2) — see [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2) |
+| Report stage | **MedGemma 1.5 4B** (only staged report LLM) + projected **TITAN slide embedding (@ ×20 only)** (Phase 2) — see [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos) |
 | Thumbnail baseline | **Done on cluster** — `/mnt/projects/mlmi/reg2/dataset/thumbnails/` |
 | Hardware | 1× A100-80G or 2× A100-40G |
 
@@ -60,7 +60,7 @@ c. # Default: rank K-means centroids (kmeans_k=100 in configs/vision.yaml), then
    top_k_patches = load_raw_patches(tier, top_k_indices)   # raw images for VLM
 
 d. answer = VLM(top_k_patches, node.question, HippoRAG_context)
-   # target: Qwen2.5-VL-7B local INT8 in enroot; interim: Qwen3-VL-8B via vLLM
+   # current default: Qwen3-VL-8B-Instruct; ablation: InternVL3.5-8B; TODO: PathChat+
 ```
 
 Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`, `retrieval.kmeans_k`. Implemented via `GraphGuidedRetriever` + `node.retrieval_text` + `PatchRetrieveProvider`. Encoder decisions: [PROJECT_OVERVIEW.md §2b](PROJECT_OVERVIEW.md#2b-locked-architectural-decisions).
