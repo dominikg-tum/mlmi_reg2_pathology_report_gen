@@ -1,8 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=wsi-levels
 #SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+#SBATCH --export=ALL
 #SBATCH --partition=24g
-#SBATCH --qos=students_normal
+#SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
 #SBATCH --time=00:15:00
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/wsi_levels_%j.out
@@ -23,6 +24,7 @@
 
 set -euo pipefail
 
+# shellcheck source=load_paths.sh
 source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
 load_cluster_paths
 

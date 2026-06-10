@@ -1,13 +1,65 @@
 # Source from SLURM scripts with an absolute path (sbatch copies scripts to /var/spool/slurmd/…).
 # Sets REPO, CONTAINER, MODEL, MODEL_NAME, PROJECT_ROOT, LOGS_DIR from configs/paths.yaml.
+#
+# User secrets (HF_TOKEN, etc.):
+#   1. Recommended: echo 'export HF_TOKEN=hf_...' > ~/.hf_env && chmod 600 ~/.hf_env
+#   2. Or add export HF_TOKEN=... to ~/.bashrc (also parsed when bashrc skips non-interactive shells)
+
+CLUSTER_REPO="/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen"
 
 _cluster_paths_repo() {
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  echo "$(cd "${script_dir}/../.." && pwd)"
+  echo "${CLUSTER_REPO}"
+}
+
+# Load HF_TOKEN and other user exports for non-interactive SLURM jobs.
+load_user_env() {
+  if [[ -f "${HOME}/.hf_env" ]]; then
+    # shellcheck source=/dev/null
+    source "${HOME}/.hf_env"
+  fi
+
+  # ~/.bashrc often returns early for non-interactive shells — grep HF_TOKEN as fallback.
+  if [[ -z "${HF_TOKEN:-}" && -f "${HOME}/.bashrc" ]]; then
+    local token_line token
+    token_line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?HF_TOKEN=' "${HOME}/.bashrc" | tail -1 || true)"
+    if [[ -n "${token_line}" ]]; then
+      token="${token_line#*HF_TOKEN=}"
+      token="${token#export }"
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      token="${token#\"}"; token="${token%\"}"
+      token="${token#\'}"; token="${token%\'}"
+      if [[ -n "${token}" ]]; then
+        export HF_TOKEN="${token}"
+      fi
+    fi
+  fi
+
+  if [[ -n "${HF_TOKEN:-}" ]]; then
+    export HF_TOKEN
+    export HUGGING_FACE_HUB_TOKEN="${HUGGING_FACE_HUB_TOKEN:-${HF_TOKEN}}"
+  fi
+}
+
+# Extra enroot args to forward HF auth into the container.
+cluster_enroot_hf_env() {
+  if [[ -n "${HF_TOKEN:-}" ]]; then
+    printf '%s\n' "--env" "HF_TOKEN=${HF_TOKEN}" "--env" "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}"
+  fi
+}
+
+# Bash snippet run inside enroot before model download / encode jobs.
+cluster_hf_login_snippet() {
+  cat <<'EOF'
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  huggingface-cli login --token "${HF_TOKEN}" 2>/dev/null || true
+fi
+EOF
 }
 
 load_cluster_paths() {
+  load_user_env
+
   local paths_yaml="${1:-$(_cluster_paths_repo)/configs/paths.yaml}"
   if [[ ! -f "${paths_yaml}" ]]; then
     echo "load_cluster_paths: missing ${paths_yaml}" >&2
