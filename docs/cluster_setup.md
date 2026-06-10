@@ -318,7 +318,8 @@ the live model name / port with teammates.
 ### 7.1 What's deployed where
 
 ```bash
-ls /mnt/projects/mlmi/reg2/models/          # local model weights
+ls /mnt/projects/mlmi/reg2/containers/    # team + personal .sqsh exports (§3.0)
+ls /mnt/projects/mlmi/reg2/models/        # local model weights (§3.0)
 ls /mnt/projects/mlmi/reg2/repos/         # TITAN, Patho-R1, quilt-llava, …
 grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 ```
@@ -327,12 +328,13 @@ grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 |---|---|---|
 | **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | MVP VLM — default in `configs/paths.yaml` and `start_qwen_server.sh` |
 | **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Larger upper-bound baseline |
-| **InternVL3_5-8B / 14B** | `models/InternVL3_5-8B`, `InternVL3_5-14B` | LoRA fine-tune candidates |
+| **InternVL3_5-8B** | `models/InternVL3_5-8B` | LoRA fine-tune candidate |
+| **InternVL3_5-14B** | `models/InternVL3_5-14B` | LoRA fine-tune candidate |
 | **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | Small medical VLM baseline |
 | **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
 | **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
 
-All paths are listed in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
+Full on-disk inventory: [§3.0](#30-shared-containers--models-inventory). Paths in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
 
 Repo scripts live under `scripts/cluster/`:
 
@@ -550,10 +552,12 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 
 | Task | Command |
 |---|---|
+| List containers / models | `ls /mnt/projects/mlmi/reg2/containers/` · `ls /mnt/projects/mlmi/reg2/models/` |
+| First-time container | Import team base → `enroot create --name yourname_mlmi` → install deps → export (§3) |
 | Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l` |
 | Cursor SSH job | `sbatch --partition=24g /mnt/general/examples/ssh.sh` |
-| Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi` |
-| Export container | `enroot export --force --output .../dominik_$(date +%Y%m%d)_base.sqsh dominik_mlmi` |
+| Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp yourname_mlmi` |
+| Export container | `enroot export --force --output .../yourname_$(date +%Y%m%d)_base.sqsh yourname_mlmi` |
 | Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
 | Start Qwen (vLLM) | `sbatch scripts/cluster/start_qwen_server.sh` |
 | Test Qwen client | `python extraction/qa_extractor.py` |

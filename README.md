@@ -100,6 +100,6 @@ python scripts/data/build_manifest.py --example-only
 
 ## Cluster
 
-`/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen` — see [cluster_setup.md](docs/cluster_setup.md).
+`/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen` — see [cluster_setup.md](docs/cluster_setup.md) (enroot quick-start, SLURM, vLLM).
 
-Paths, models, and containers: `configs/paths.yaml`. Offline WSI cache: `configs/vision.yaml` (`cache_root` → `dominik/cache` on cluster).
+Shared assets: `containers/` (team `.sqsh` bases + per-person exports), `models/` (Qwen3-VL, InternVL, MedGemma). **Create your own container** per the §3 tutorial — do not overwrite shared images. Paths: `configs/paths.yaml`. Offline WSI cache: `configs/vision.yaml` (`cache_root` → `dominik/cache` on cluster).
