@@ -31,7 +31,7 @@ Build a system that, **given only a WSI at test time**, walks a **diagnostic gra
 | Location | Contents |
 |----------|----------|
 | `/mnt/projects/mlmi/reg2/containers/` | Team `.sqsh` bases: `qwen25_graphrag.sqsh`, `qwen25.sqsh`, `qwen25_dev_updated.sqsh`, `qwen25_dev_v2.sqsh`; personal exports e.g. `dominik_20260529_base.sqsh`. **Each person creates their own** enroot env + export — follow §3 in `cluster_setup.md`. |
-| `/mnt/projects/mlmi/reg2/models/` | **Only these five today:** `Qwen3-VL-8B-Instruct`, `Qwen3-VL-30B-A3B-Instruct`, `InternVL3_5-8B`, `InternVL3_5-14B`, `medgemma-1.5-4b-it` — see [§2d model TODOs](#2d-model-deployment-status--todos) |
+| `/mnt/projects/mlmi/reg2/models/` | **Only these five today:** `Qwen3-VL-8B-Instruct`, `Qwen3-VL-30B-A3B-Instruct`, `InternVL3_5-8B`, `InternVL3_5-14B`, `medgemma-1.5-4b-it` — see [§2d](#2d-model-deployment-status) |
 | `/mnt/projects/mlmi/reg2/repos/` | Cloned code: `mlmi_reg2_pathology_report_gen`, `TITAN`, `Patho-R1`, `quilt-llava` |
 | `/mnt/projects/mlmi/reg2/dataset/` | Offline thumbnail caches: `thumbnails/`, `thumbnails_kmeans/`, `thumbnails_kmeans_5/` (**done**) |
 
@@ -156,7 +156,7 @@ Two **different** model jobs — do not reuse the same weights for both phases w
 | **1** | Per-node patch VLM (graph answerer) | top-k **raw patch images** + node question + HippoRAG context | Structured node answer → `cot_chain` |
 | **2** | Final report LLM | Serialized `cot_chain` + projected TITAN slide emb (text-only) | CAP-format pathology report |
 
-Cluster weights live under `/mnt/projects/mlmi/reg2/models/`. **Only five models are staged today** — plan below uses what is on disk; aspirational models are in [§2d](#2d-model-deployment-status--todos).
+Cluster weights live under `/mnt/projects/mlmi/reg2/models/`. **Only five models are staged today** — plan below uses what is on disk; see [§2d](#2d-model-deployment-status) for optional future downloads.
 
 #### Role 1 — Per-node patch VLM (Phase 1)
 
@@ -167,9 +167,8 @@ Cluster weights live under `/mnt/projects/mlmi/reg2/models/`. **Only five models
 | **InternVL3.5-14B** | 14B | Upper-bound open VLM | 2× GPU; slow per-node loop | ✅ ablation only |
 | **Qwen3-VL-30B-A3B-Instruct** | 30B | Quality upper bound | Needs 2+ GPUs; too heavy for default graph loop | ✅ upper-bound eval |
 | **MedGemma 1.5 4B** | 4B | Medical / WSI-trained | **Wrong role** — slide-level model, not per-patch node Q&A | ✅ on disk — **Phase 2 only** |
-| **PathChat+** | ~7–13B | Best scientific fit (~1.1M pathology ROI instructions) | Not staged; gated HF; deploy TODO | ❌ [§2d TODO](#2d-model-deployment-status--todos) |
 
-**Verdict — Phase 1 (current plan):** Run graph traversal with **Qwen3-VL-8B-Instruct**. Ablate with **InternVL3.5-8B**; LoRA **InternVL3.5-8B** when training lane is ready. Use **Qwen3-VL-30B** only for quality ceiling experiments. **Do not use MedGemma** for node answering. **PathChat+** is the long-term scientific target once deployed (§2d).
+**Verdict — Phase 1 (current plan):** Run graph traversal with **Qwen3-VL-8B-Instruct**. Ablate with **InternVL3.5-8B**; LoRA **InternVL3.5-8B** when training lane is ready. Use **Qwen3-VL-30B** only for quality ceiling experiments. **Do not use MedGemma** for node answering.
 
 #### Role 2 — Final report generation (Phase 2)
 
@@ -179,7 +178,6 @@ Cluster weights live under `/mnt/projects/mlmi/reg2/models/`. **Only five models
 | **Qwen3-VL-8B-Instruct** | 8B | On cluster | Vision LM — wasteful for text-only report stage | ✅ wrong role for Phase 2 |
 | **InternVL3.5** | 8B / 14B | On cluster | Vision LM — wrong role | ❌ Phase 2 |
 | **Qwen2.5-7B-Instruct** | 7B | Strong CAP instruction-following | Not staged | ❌ optional future download |
-| **PathChat+** | ~7–13B | Pathology-native | Not staged; overkill for text-only synthesis | ❌ §2d TODO |
 
 **Verdict — Phase 2 (current plan):** **medgemma-1.5-4b-it** is the only staged report LLM — use it for Phase 2 now. **Run a quick CAP-format test** on 5–10 slides and tune prompts before locking eval defaults.
 
@@ -191,10 +189,8 @@ flowchart LR
         P[CONCH top-k patches]
         Q[Qwen3-VL-8B — current default]
         I[InternVL3.5-8B + LoRA]
-        PC[PathChat+ — TODO]
         P --> Q
         P --> I
-        P -.-> PC
     end
     subgraph p2 [Phase 2 — report writer]
         C[cot_chain + slide_emb]
@@ -211,7 +207,7 @@ flowchart LR
 | **14B** | 1 | Upper-bound ablation (2× GPU) |
 | **8B / 14B** | 2 | **Not used** — text-only report stage |
 
-**Practical order (with current weights only):** (1) offline artifacts + K-means index → (2) Phase 1 with **Qwen3-VL-8B** + `graph_guided` retrieval → (3) HippoRAG 2 real index → (4) Phase 2 projector + **MedGemma 1.5 4B** report writer → (5) eval edge parser → (6) LoRA **InternVL3.5-8B** ablation → (7) deploy **PathChat+** (§2d) and re-benchmark Phase 1.
+**Practical order (with current weights only):** (1) offline artifacts + K-means index → (2) Phase 1 with **Qwen3-VL-8B** + `graph_guided` retrieval → (3) HippoRAG 2 real index → (4) Phase 2 projector + **MedGemma 1.5 4B** report writer → (5) eval edge parser → (6) LoRA **InternVL3.5-8B** ablation.
 
 ---
 
@@ -248,7 +244,7 @@ Build in this sequence — each step depends on the previous artifacts:
 
 ---
 
-## 2d. Model deployment status & TODOs
+## 2d. Model deployment status
 
 ### Staged on cluster today (`ls /mnt/projects/mlmi/reg2/models/`)
 
@@ -259,19 +255,6 @@ Build in this sequence — each step depends on the previous artifacts:
 | `InternVL3_5-8B` | 1 | Zero-shot ablation + LoRA fine-tune substrate |
 | `InternVL3_5-14B` | 1 | Upper-bound ablation (2× GPU) |
 | `medgemma-1.5-4b-it` | 2 | **Default report LLM** |
-
-### TODO — deploy PathChat+ (scientific target for Phase 1)
-
-PathChat+ is the pathology-native VLM from SlideSeek ([arXiv:2506.20964](https://arxiv.org/abs/2506.20964)). It is **not** on the cluster yet.
-
-| Step | Action | Owner |
-|------|--------|-------|
-| 1 | Request / confirm **MahmoodLab HuggingFace access** for PathChat+ weights | XUN / DOMI |
-| 2 | On a compute node: `huggingface-cli download <PathChat+_repo_id> --local-dir /mnt/projects/mlmi/reg2/models/PathChat-plus` | XUN |
-| 3 | Smoke-test load inside enroot (`transformers`, multi-image patch batch) — measure VRAM on 1× A100-40G | XUN |
-| 4 | Add path to `configs/paths.yaml` under `models:` + `AnswerBackend` in `agent/backends.py` | XUN |
-| 5 | Benchmark vs **Qwen3-VL-8B** on 5–10 graph nodes (node accuracy, latency) | ALL |
-| 6 | If VRAM allows, swap default Phase 1 VLM to PathChat+; else keep as ablation / upper-tier model | DOMI + XUN |
 
 ### Optional future downloads (not required for current plan)
 
@@ -297,7 +280,7 @@ PathChat+ is the pathology-native VLM from SlideSeek ([arXiv:2506.20964](https:/
 | Graph-tier zoom retrieval | **Implemented** — `node.zoom_level` → pool; **`TitanEncoder.encode_text()`** query | `retrieval/graph_guided.py`, `retrieval/titan_cosine.py` |
 | Patch retrieval (cosine) | **Implemented** — K-means centroid pool + diversity filter + full-pool flag | `retrieval/titan_cosine.py` |
 | HippoRAG 2 | **Partial** — embedding fallback for smoke tests; full KG TODO (NICK) | `memory/hipporag2.py`, `scripts/memory/build_hipporag_index.py` |
-| Per-node VLM | **Partial** — Qwen3-VL-8B via vLLM API; PathChat+ deploy TODO (§2d) | `agent/backends.py`, `scripts/inference/run_phase1.py` |
+| Per-node VLM | **Partial** — Qwen3-VL-8B via vLLM API | `agent/backends.py`, `scripts/inference/run_phase1.py` |
 | Phase 2 report LLM + slide projector | **Implemented** — MedGemma 1.5 4B + linear projector stub | `agent/report_writer.py`, `scripts/inference/run_phase2.py` |
 | cot_chain / report disk persistence | **Implemented** — `runs/{slide_id}/cot_chain.json`, `report.txt` | `scripts/inference/run_phase1.py`, `run_phase2.py` |
 | REG² chain metrics (BPV, Edge-F1, MESS) | **Implemented** | `eval/metrics/chain.py`, `eval/run_eval.py` |
@@ -357,7 +340,7 @@ Factory: `--memory flat|hipporag2|graphrag` (graphrag = ablation stub).
 | **DOGA** | Graph JSONL | `data/graph/execution_graph.jsonl`, `graph/loader.py` |
 | **NICK** | HippoRAG 2 | `memory/hipporag2.py`, `scripts/memory/` |
 | **DOMI** | WSI offline + retrieval + pipeline | `vision/`, `scripts/vision/`, `scripts/preprocess/`, `scripts/inference/` |
-| **XUN** | VLM serve (**Qwen3-VL-8B** now; PathChat+ deploy §2d) + MedGemma Phase 2 | `configs/paths.yaml`, `agent/backends/`, `scripts/cluster/` |
+| **XUN** | VLM serve (**Qwen3-VL-8B**) + MedGemma Phase 2 | `configs/paths.yaml`, `agent/backends/`, `scripts/cluster/` |
 | **ALL** | Eval, agent | `eval/`, `baselines/run_agent.py` |
 
 ---
@@ -402,7 +385,7 @@ python -m scripts.vision.encode_slide_embeddings --slide CASE.svs
 | `--memory` | `flat`, `hipporag2` | |
 | `--retriever` | `none`, `titan_cosine`, `graph_guided` | **`graph_guided` = default** — `zoom_level` → pool |
 | `--navigator` | `graph_guided` | Same graph-as-MST policy |
-| VLM (Phase 1) | **Qwen3-VL-8B** (default) → InternVL3.5-8B zero-shot / LoRA → Qwen3-VL-30B upper bound → PathChat+ (TODO §2d) | Only staged VLMs on cluster |
+| VLM (Phase 1) | **Qwen3-VL-8B** (default) → InternVL3.5-8B zero-shot / LoRA → Qwen3-VL-30B upper bound | Only staged VLMs on cluster |
 | K-means pool | **Default on** (`kmeans_k=100`); `--search-all-patches` ablation | Faster retrieval; k tunable in `configs/vision.yaml` |
 | Report LLM (Phase 2) | **MedGemma 1.5 4B** (only staged report LLM) | `models/medgemma-1.5-4b-it` |
 | Flat ×20 pool | Ablation | Force all nodes to `embeddings_high.pt` regardless of `zoom_level` |
@@ -419,12 +402,12 @@ Two recent pathology-agent papers shape our design. We **do not** replicate eith
 
 | Idea from PathChat+ / SlideSeek | Our adoption |
 |-----------------------------------|--------------|
-| **Evidence-based per-step reasoning** — each answer grounded in selected patch images, not slide-level guess | ✅ Phase 1: top-k CONCH-retrieved patches → **Qwen3-VL-8B** per graph node (PathChat+ when deployed — §2d) |
+| **Evidence-based per-step reasoning** — each answer grounded in selected patch images, not slide-level guess | ✅ Phase 1: top-k CONCH-retrieved patches → **Qwen3-VL-8B** per graph node |
 | **Iterative chain accumulation** — partial reasoning carried forward across steps | ✅ `cot_chain` list + episodic memory + HippoRAG 2 retrieval of similar past steps |
 | **Hierarchical diagnostic structure** — coarse → fine reasoning over a case | ✅ Uterus ontology tiers (`global_features` → `local_features` → `integration`); deterministic graph replaces SlideSeek's learned agent planner |
 | **Separate synthesis stage** — chain of evidence → final human-readable report | ✅ Phase 2: dedicated **MedGemma 1.5 4B** report writer (not the same call as node answering) |
 | **Visually grounded outputs** — answers tied to WSI regions | ✅ Retrieved patch PNGs in VLM prompt; optional edge parser links answers to graph nodes |
-| **PathChat+ as the VLM** | ⏳ **TODO deploy** (§2d); interim: **Qwen3-VL-8B** + **InternVL3.5-8B LoRA** |
+| **Pathology-native VLM (PathChat+ in SlideSeek)** | ❌ Weights not public — use **Qwen3-VL-8B** + **InternVL3.5-8B LoRA** instead |
 | **Autonomous multi-agent navigation** (SlideSeek agents pick where to look next) | ❌ REG² requires reproducible reasoning paths → **deterministic graph traversal** owns navigation |
 | **End-to-end SlideSeek training** | ❌ Out of scope; we reuse MahmoodLab encoders + open VLMs |
 
@@ -458,7 +441,7 @@ Two recent pathology-agent papers shape our design. We **do not** replicate eith
 | HippoRAG 2 | [github.com/OSU-NLP-Group/HippoRAG](https://github.com/OSU-NLP-Group/HippoRAG) |
 | Qwen3-VL-8B / 30B | Phase 1 node VLM — **current default** (8B) |
 | InternVL3.5 | Phase 1 ablation + LoRA (`models/InternVL3_5-{8,14}B`) |
-| PathChat+ | Phase 1 scientific target — **deploy TODO** §2d |
+| SlideSeek (evidence chain → report) | Design lineage for Phase 1/2 pipeline |
 | MedGemma 1.5 4B | Phase 2 report LLM — **current default** |
 | MedGemma | [github.com/google-health/medgemma](https://github.com/google-health/medgemma) |
 | PolyPath | [arXiv:2502.10536](https://arxiv.org/abs/2502.10536) — multi-slide report gen via Gemini LoRA |

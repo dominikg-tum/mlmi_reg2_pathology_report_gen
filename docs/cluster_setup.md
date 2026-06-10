@@ -334,7 +334,6 @@ grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 | **InternVL3_5-8B** | `models/InternVL3_5-8B` | Phase 1 ablation + LoRA substrate |
 | **InternVL3_5-14B** | `models/InternVL3_5-14B` | Phase 1 upper-bound ablation (2× GPU) |
 | **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | **Default Phase 2 report LLM** — not Phase 1 node answerer |
-| **PathChat+** | *(not staged)* | **TODO** — scientific Phase 1 target; see [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos) |
 | **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
 | **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
 
@@ -378,7 +377,7 @@ python -m baselines.run_agent \
   --slide-id CASE.svs
 ```
 
-**Alternatives on disk:** InternVL3.5-8B (ablation / LoRA), Qwen3-VL-30B (upper bound, 2× GPU). **PathChat+** is not staged — deploy steps in [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos).
+**Alternatives on disk:** InternVL3.5-8B (ablation / LoRA), Qwen3-VL-30B (upper bound, 2× GPU).
 
 ### 7.3 Qwen via vLLM (WP3 + Phase 1 API path)
 
@@ -597,7 +596,6 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 | Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
 | Phase 1 VLM (default) | Qwen3-VL-8B — vLLM: `sbatch scripts/cluster/start_qwen_server.sh` — see §7.2 |
 | Phase 2 report LLM | MedGemma 1.5 4B — `models/medgemma-1.5-4b-it` |
-| Deploy PathChat+ | TODO — [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos) |
 | Test Qwen client | `python extraction/qa_extractor.py` |
 | WP3 extraction | `python extraction/extract_report_parts.py` |
 | Explore WSI (batch) | `sbatch scripts/cluster/explore_data.sh` |

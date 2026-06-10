@@ -60,7 +60,7 @@ c. # Default: rank K-means centroids (kmeans_k=100 in configs/vision.yaml), then
    top_k_patches = load_raw_patches(tier, top_k_indices)   # raw images for VLM
 
 d. answer = VLM(top_k_patches, node.question, HippoRAG_context)
-   # current default: Qwen3-VL-8B-Instruct; ablation: InternVL3.5-8B; TODO: PathChat+
+   # current default: Qwen3-VL-8B-Instruct; ablation: InternVL3.5-8B
 ```
 
 Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`, `retrieval.kmeans_k`. Implemented via `GraphGuidedRetriever` + `node.retrieval_text` + `PatchRetrieveProvider`. Encoder decisions: [PROJECT_OVERVIEW.md §2b](PROJECT_OVERVIEW.md#2b-locked-architectural-decisions).
