@@ -13,8 +13,8 @@
 | Dataset | ~220 WSIs (150 train+val / 70 test) under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` |
 | Offline backbone | CONCHv1.5 (`MahmoodLab/CONCH`, 768-d) + TITAN slide encoder (`MahmoodLab/TITAN`, 1024-d) |
 | Tiling (locked) | **Four zoom levels**, non-overlapping native patch sizes → resize to **224×224** before CONCH encode |
-| Agent workflow | Graph Q&A → **`node.zoom_level`** → load `patch_embeddings_{tier}.pt` → CONCH text×vision cosine → raw patches → VLM |
-| Report stage | Qwen2.5-7B-Instruct + projected **TITAN slide embedding (@ ×20 only)** (Phase 2) |
+| Agent workflow | Graph Q&A → **`node.zoom_level`** → load `patch_embeddings_{tier}.pt` → **K-means centroid pool (default)** → `TitanEncoder.encode_text()` cosine → raw patches → VLM |
+| Report stage | **MedGemma 1.5 4B** or **Qwen2.5-7B-Instruct** + projected **TITAN slide embedding (@ ×20 only)** (Phase 2) — see [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2) |
 | Thumbnail baseline | **Done on cluster** — `/mnt/projects/mlmi/reg2/dataset/thumbnails/` |
 | Hardware | 1× A100-80G or 2× A100-40G |
 
@@ -51,16 +51,19 @@ Force all nodes to `patch_embeddings_20x.pt` regardless of `zoom_level`.
 a. tier = node["zoom_level"]
    patch_embeddings = load("patch_embeddings_{tier}.pt")
 
-b. node_text_emb = conch_text_encoder(node["question"] + " " + node["description"])  # (768,)
+b. node_text_emb = TitanEncoder.encode_text(node.retrieval_text)  # question + description, (768,)
 
-c. similarities = cosine_similarity(node_text_emb, patch_embeddings[tier])
+c. # Default: rank K-means centroids (kmeans_k=100 in configs/vision.yaml), then load winning patches
+   # Optional: search full patch pool (--search-all-patches) — simpler, slower
+   similarities = cosine_similarity(node_text_emb, centroid_embeddings[tier])
    top_k_indices = argsort(similarities, descending=True)[:k]
    top_k_patches = load_raw_patches(tier, top_k_indices)   # raw images for VLM
 
-d. answer = Qwen2.5-VL-7B(top_k_patches, node.question, HippoRAG_context)
+d. answer = VLM(top_k_patches, node.question, HippoRAG_context)
+   # target: Qwen2.5-VL-7B local INT8 in enroot; interim: Qwen3-VL-8B via vLLM
 ```
 
-Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`. Implemented via `GraphGuidedRetriever` + `node.retrieval_text` + `PatchRetrieveProvider`.
+Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`, `retrieval.kmeans_k`. Implemented via `GraphGuidedRetriever` + `node.retrieval_text` + `PatchRetrieveProvider`. Encoder decisions: [PROJECT_OVERVIEW.md §2b](PROJECT_OVERVIEW.md#2b-locked-architectural-decisions).
 
 ### HippoRAG 2 (semantic memory, not patch retrieval)
 
@@ -71,15 +74,16 @@ Retrieves similar past CoT steps given `(node_id + partial chain)`. Top-2 steps 
 ## 3. Offline preprocessing (add to existing)
 
 ```
-WSI (.svs)
+WSI (.svs) under /mnt/projects/mlmi/TUMUntera/TUM_Untera_data
   → thumbnail (done on cluster)
   → tile at 5×/10×/20×/40× (native px per table above)
-  → resize each patch to 224×224 → CONCHv1.5 vision encode
+  → resize each patch to 224×224 → CONCHv1.5 vision encode via TitanEncoder.return_conch()
   → save patch_embeddings_{5x,10x,20x,40x}.pt  (N × 768 each)
+  → K-means centroids per pool (default k=100) → kmeans_centroids_{zoom}.pt
   → TITAN slide encode on 20× pool only → slide_embedding.pt
 ```
 
-Cluster scripts: `scripts/vision/tile_slides.py`, `encode_patches_offline.py`, `encode_slide_embeddings.py`
+Cluster scripts: `scripts/vision/tile_slides.py`, `encode_patches_offline.py`, `build_kmeans_index.py`, `encode_slide_embeddings.py`
 
 ---
 
@@ -87,9 +91,10 @@ Cluster scripts: `scripts/vision/tile_slides.py`, `encode_patches_offline.py`, `
 
 | # | Method | Zoom-aware? | Graph-aware? | Status |
 |---|--------|-------------|--------------|--------|
-| A | **CONCH cross-modal cosine** | Yes (4 pools) | Query + `description` | Partial — TITAN text encoder + K-means |
+| A | **CONCH cross-modal cosine** | Yes (4 pools) | Query + `description` via `encode_text()` | **Primary** — `TitanEncoder` single load |
 | B | **`zoom_level` routing** | Yes | Yes | **Primary path** |
-| C | **MMNavAgent CMT parent** | Yes | Partial | ×10 parent when tier=20× |
+| C | **K-means centroid pool** | Yes | — | **Default on** (`kmeans_k=100`; optional full-pool search) |
+| D | **MMNavAgent CMT parent** | Yes | Partial | ×10 parent when tier=20× |
 
 ---
 
@@ -104,6 +109,7 @@ Cluster scripts: `scripts/vision/tile_slides.py`, `encode_patches_offline.py`, `
 | TITAN source zoom | 20× only |
 | top-k @ 5× / 10× | 3 |
 | top-k @ 20× / 40× | 5 |
+| K-means centroids per pool | 100 (default; tune in `configs/vision.yaml`) |
 | HippoRAG retrieval k | 2 CoT steps |
 
 ---
