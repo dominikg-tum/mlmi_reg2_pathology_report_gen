@@ -80,11 +80,17 @@ def encode_one_slide(
     )
 
     torch.save(slide_emb, out_dir / "slide_embedding.pt")
-    torch.save(
-        {"embeddings": patch_emb, "coords": np.asarray(coords)},
-        out_dir / "embeddings_high.pt",
-    )
-    torch.save(np.asarray(coords, dtype=np.int64), out_dir / "coords_high.pt")
+
+    # Canonical ×20 pool artifacts — only if encode_patches_offline has not run yet.
+    canonical_emb = out_dir / "patch_embeddings_20x.pt"
+    canonical_coords = out_dir / "coords_20x.pt"
+    if not canonical_emb.exists():
+        torch.save(
+            {"embeddings": patch_emb, "coords": np.asarray(coords)},
+            canonical_emb,
+        )
+    if not canonical_coords.exists():
+        torch.save(np.asarray(coords, dtype=np.int64), canonical_coords)
 
     evidence_names = _save_evidence_patches(
         patches, coords, out_dir / "evidence", k=3
