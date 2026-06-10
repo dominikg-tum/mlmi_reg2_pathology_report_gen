@@ -35,8 +35,16 @@ class SlideEmbeddings:
 
 
 class TitanCosineRetriever:
-    def __init__(self, text_encoder=None, *, top_k: int | None = None, d_min_20x: int | None = None):
+    def __init__(
+        self,
+        text_encoder=None,
+        *,
+        top_k: int | None = None,
+        d_min_20x: int | None = None,
+        search_all_patches: bool = False,
+    ):
         self.text_encoder = text_encoder
+        self.search_all_patches = search_all_patches
         rcfg = retrieval_config()
         self.top_k = top_k if top_k is not None else int(rcfg.get("top_k", 5))
         self.d_min_20x = d_min_20x if d_min_20x is not None else int(rcfg.get("d_min_20x_px", 512))
@@ -104,13 +112,19 @@ class TitanCosineRetriever:
         level = normalize_zoom(level)
         k = k if k is not None else top_k_for_zoom(level)
         slide = self._load_embeddings(slide_cache, level)
-        centroid_idx = self._load_centroid_indices(slide_cache, level)
 
-        centroid_emb = slide.embeddings[centroid_idx]
-        centroid_coords = slide.coords[centroid_idx]
+        if self.search_all_patches:
+            pool_emb = slide.embeddings
+            pool_coords = slide.coords
+            pool_indices = np.arange(len(slide.embeddings), dtype=np.int64)
+        else:
+            centroid_idx = self._load_centroid_indices(slide_cache, level)
+            pool_emb = slide.embeddings[centroid_idx]
+            pool_coords = slide.coords[centroid_idx]
+            pool_indices = centroid_idx
 
         q = self.encode_query(query)
-        sims = _cosine(q, centroid_emb)
+        sims = _cosine(q, pool_emb)
         if exclude:
             sims[list(exclude)] = -np.inf
 
@@ -120,7 +134,7 @@ class TitanCosineRetriever:
             raise RuntimeError(f"patch_size_lv0 missing in meta_{level}.json")
 
         accepted_local = self._diversity_filter_with_size(
-            order, centroid_coords, level=level, k=k, patch_size_lv0=ps_lv0
+            order, pool_coords, level=level, k=k, patch_size_lv0=ps_lv0
         )
 
         parent_coords_medium: np.ndarray | None = None
@@ -134,8 +148,8 @@ class TitanCosineRetriever:
 
         results: list[RetrievedPatch] = []
         for local_i in accepted_local:
-            global_i = int(centroid_idx[local_i])
-            coord = tuple(int(centroid_coords[local_i, 0]), int(centroid_coords[local_i, 1]))
+            global_i = int(pool_indices[local_i])
+            coord = (int(pool_coords[local_i, 0]), int(pool_coords[local_i, 1]))
             sim = float(sims[local_i])
             parent_coord = None
             parent_index = None
@@ -148,7 +162,7 @@ class TitanCosineRetriever:
                     patch_size_lv0_high=ps_lv0,
                     patch_size_lv0_medium=ps_medium,
                 )
-                parent_coord = tuple(
+                parent_coord = (
                     int(parent_coords_medium[parent_index, 0]),
                     int(parent_coords_medium[parent_index, 1]),
                 )

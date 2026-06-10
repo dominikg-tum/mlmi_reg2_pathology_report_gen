@@ -28,7 +28,10 @@ def get_retriever(method: str, **kwargs) -> PatchRetriever | None:
     if method == "titan_cosine":
         from retrieval.titan_cosine import TitanCosineRetriever
 
-        return TitanCosineRetriever(text_encoder=kwargs.get("text_encoder"))
+        return TitanCosineRetriever(
+            text_encoder=kwargs.get("text_encoder"),
+            search_all_patches=bool(kwargs.get("search_all_patches", False)),
+        )
     if method == "graph_guided":
         from retrieval.graph_guided import GraphGuidedRetriever
 
