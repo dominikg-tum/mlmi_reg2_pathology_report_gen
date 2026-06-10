@@ -4,7 +4,6 @@
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
-#SBATCH --cpus-per-task=2
 #SBATCH --time=48:00:00
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/cursor_ssh_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/cursor_ssh_%j.err

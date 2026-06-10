@@ -4,7 +4,6 @@
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
-#SBATCH --cpus-per-task=4
 #SBATCH --time=04:00:00
 #SBATCH --array=0-459
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/tile_%A_%a.out

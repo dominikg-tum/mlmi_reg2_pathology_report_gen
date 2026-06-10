@@ -4,7 +4,6 @@
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
-#SBATCH --cpus-per-task=2
 #SBATCH --time=01:00:00
 #SBATCH --array=0-459
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/kmeans_%A_%a.out

@@ -190,7 +190,8 @@ Cursor uses the same Remote SSH flow as VS Code.
 Cursor is an editor session and keeps the GPU at 0% util; the scheduler may auto-cancel
 after ~2 hours and wastes a GPU slot that preprocessing jobs need.
 
-Use the repo script instead:
+Use the repo script instead (no `--gres=gpu`, no `--cpus-per-task` — the `24g`
+partition rejects manual CPU requests):
 
 ```bash
 cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
