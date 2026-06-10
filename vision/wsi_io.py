@@ -8,7 +8,7 @@ from typing import Iterator
 import numpy as np
 
 # Approximate microns-per-pixel at common objectives (fallback when mpp-x missing).
-_MPP_BY_OBJECTIVE = {"4x": 2.5, "10x": 1.0, "20x": 0.5}
+_MPP_BY_OBJECTIVE = {"5x": 2.0, "4x": 2.5, "10x": 1.0, "20x": 0.5, "40x": 0.25}
 
 
 def slide_id_from_path(svs_path: Path) -> str:

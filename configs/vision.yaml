@@ -10,24 +10,40 @@ thumbnail:
   max_edge_px: 1024
   format: png
 
+# Multi-scale tiling: native patch size per zoom → resize to conch_input_px before CONCH encode.
 magnification_bands:
-  low:
-    objective: 4x
-    patch_size: 512
-  medium:
+  5x:
+    objective: 5x
+    patch_size: 2048
+    conch_input_px: 224
+  10x:
     objective: 10x
-    patch_size: 512
-  high:
+    patch_size: 1024
+    conch_input_px: 224
+  20x:
     objective: 20x
     patch_size: 512
+    conch_input_px: 224
+  40x:
+    objective: 40x
+    patch_size: 256
+    conch_input_px: 224
 
 retrieval:
   kmeans_k: 100
   top_k: 5
+  top_k_by_zoom:
+    5x: 3
+    10x: 3
+    20x: 5
+    40x: 5
   d_min_20x_px: 512
+  # CONCH offline: four separate patch embedding pools per WSI (Phase 1 only).
   encode_levels:
-    - medium
-    - high
+    - 5x
+    - 10x
+    - 20x
+    - 40x
   # abmil_fallback: reserved — only if cosine sim shows systematic failures (not implemented)
 
 defaults:

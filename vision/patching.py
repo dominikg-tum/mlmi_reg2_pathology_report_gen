@@ -12,7 +12,7 @@ from vision.wsi_io import iter_tissue_patches, load_patch_at_coord
 def extract_patch_coords(
     svs_path: Path,
     *,
-    mag_band: str = "high",
+    mag_band: str = "20x",
     background_threshold: int = 220,
     max_patches: int = 0,
     stride: int | None = None,
@@ -39,7 +39,7 @@ def extract_patch_coords(
 def extract_patches(
     svs_path: Path,
     *,
-    mag_band: str = "high",
+    mag_band: str = "20x",
     patch_size: int | None = None,
     background_threshold: int = 220,
     max_patches: int = 0,
@@ -71,7 +71,7 @@ def load_patches_from_coords(
     svs_path: Path,
     coords: list[tuple[int, int]],
     *,
-    mag_band: str = "high",
+    mag_band: str = "20x",
     patch_size: int | None = None,
 ) -> list[Any]:
     """Re-read tissue patches from WSI at precomputed level-0 coordinates."""
