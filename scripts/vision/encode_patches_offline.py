@@ -47,7 +47,7 @@ def _encode_one(
     batch_size: int,
     max_patches: int,
 ) -> None:
-    emb_path = out_dir / f"embeddings_{level}.pt"
+    emb_path = out_dir / f"patch_embeddings_{level}.pt"
     coord_path = out_dir / f"coords_{level}.pt"
     meta_path = out_dir / f"meta_{level}.json"
 
@@ -98,7 +98,7 @@ def _check_only(cache_root: Path, data_dir: Path, levels: list[str]) -> None:
         for level in levels:
             done_path = slide_log_path(cache_root, sid, f"encoded_{level}.done")
             fail_path = slide_log_path(cache_root, sid, f"encoded_{level}.failed")
-            emb_path = out_dir / f"embeddings_{level}.pt"
+            emb_path = out_dir / f"patch_embeddings_{level}.pt"
             if done_path.exists() or emb_path.exists():
                 done += 1
             elif fail_path.exists():
@@ -111,7 +111,7 @@ def _check_only(cache_root: Path, data_dir: Path, levels: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Encode WSI patches with TITAN/CONCH.")
-    parser.add_argument("--level", choices=["low", "medium", "high"], action="append")
+    parser.add_argument("--level", choices=["5x", "10x", "20x", "40x"], action="append")
     parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--model-id", type=str, default=None)

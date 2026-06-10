@@ -19,6 +19,7 @@ from scripts.vision._common import (
     slide_log_path,
 )
 from vision.cache import slide_cache_dir
+from vision.mag_config import VALID_ZOOM_LEVELS
 from vision.patching import extract_patch_coords
 from vision.wsi_io import resolve_wsi_files, slide_id_from_path
 
@@ -77,7 +78,7 @@ def _check_only(cache_root: Path, data_dir: Path, levels: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tile WSIs and save patch coordinates only.")
-    parser.add_argument("--level", choices=["low", "medium", "high"], action="append")
+    parser.add_argument("--level", choices=list(VALID_ZOOM_LEVELS), action="append")
     parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=0)

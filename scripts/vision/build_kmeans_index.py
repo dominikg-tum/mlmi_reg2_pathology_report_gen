@@ -19,18 +19,19 @@ from scripts.vision._common import (
     slide_log_path,
 )
 from retrieval.kmeans_index import build_kmeans_index
-from vision.cache import slide_cache_dir
+from vision.cache import SlideCache, slide_cache_dir
 from vision.wsi_io import resolve_wsi_files, slide_id_from_path
 
 
-def _build_one(out_dir: Path, level: str, k: int) -> None:
-    emb_path = out_dir / f"embeddings_{level}.pt"
+def _build_one(cache_root: Path, slide_id: str, out_dir: Path, level: str, k: int) -> None:
+    cache = SlideCache(slide_id=slide_id, cache_dir=out_dir)
+    emb_path = cache.patch_embeddings_path(level)
     centroid_path = out_dir / f"kmeans_centroids_{level}.pt"
     if centroid_path.exists():
         print(f"SKIP {out_dir.name} {level} (centroids exist)")
         return
-    if not emb_path.exists():
-        raise FileNotFoundError(f"missing {emb_path}")
+    if emb_path is None or not emb_path.exists():
+        raise FileNotFoundError(f"missing patch embeddings for {level!r}")
 
     data = torch.load(emb_path, map_location="cpu", weights_only=False)
     if isinstance(data, dict):
@@ -52,7 +53,7 @@ def _build_one(out_dir: Path, level: str, k: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build K-means centroid indices per slide.")
-    parser.add_argument("--level", choices=["low", "medium", "high"], action="append")
+    parser.add_argument("--level", choices=["5x", "10x", "20x", "40x"], action="append")
     parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--k", type=int, default=None)
@@ -82,7 +83,7 @@ def main() -> None:
             done_path = slide_log_path(cache_root, sid, f"kmeans_{level}.done")
             fail_path = slide_log_path(cache_root, sid, f"kmeans_{level}.failed")
             try:
-                _build_one(out_dir, level, k)
+                _build_one(cache_root, sid, out_dir, level, k)
                 done_path.write_text(datetime.now(timezone.utc).isoformat() + "\n")
                 if fail_path.exists():
                     fail_path.unlink()

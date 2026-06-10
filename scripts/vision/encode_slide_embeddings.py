@@ -1,11 +1,8 @@
-"""Offline: TITAN slide embedding baseline (CONCH patches -> TITAN aggregate).
+"""Offline: TITAN slide embedding (×20 CONCH patches only) + optional thumbnail.
 
-Writes per slide under cache_root/{slide_id}/:
-  slide_embedding.pt   — float32 [768]
-  embeddings_high.pt   — patch matrix (for later retrieval)
-  coords_high.pt       — level-0 coords
-  evidence/*.png       — 3 patch PNGs for the VLM (pixels, not raw vectors)
-  meta.json            — patch_size_lv0, patch count, model id
+TITAN was trained on 512×512 @ 20× — slide_embedding.pt always comes from the
+high-magnification pool. Multi-scale CONCH pools (×4/×10/×20/×40) are encoded
+separately via encode_patches_offline.py for Phase 1 zoom_level retrieval.
 """
 
 from __future__ import annotations
@@ -69,7 +66,7 @@ def encode_one_slide(
 
     patches, coords, patch_size_lv0 = extract_patches(
         svs_path,
-        mag_band="high",
+        mag_band="20x",
         max_patches=max_patches,
     )
     if not patches:

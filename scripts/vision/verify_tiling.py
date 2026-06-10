@@ -46,7 +46,7 @@ def verify_slide(
     svs_path: Path,
     cache_root: Path,
     *,
-    level: str = "high",
+    level: str = "20x",
     n_preview: int = 16,
     write_flag: bool = True,
 ) -> Path:
@@ -112,7 +112,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Verify tiling on one slide (visual gate).")
     parser.add_argument("--wsi-path", type=Path, required=True)
     parser.add_argument("--cache-root", type=Path, default=None)
-    parser.add_argument("--level", choices=["low", "medium", "high"], default="high")
+    parser.add_argument("--level", choices=["5x", "10x", "20x", "40x"], default="20x")
     parser.add_argument("--n-preview", type=int, default=16)
     parser.add_argument("--no-flag", action="store_true", help="Do not write tiling_verified.flag")
     args = parser.parse_args()
