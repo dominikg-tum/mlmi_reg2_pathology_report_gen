@@ -5,9 +5,9 @@ from graph.schema import (
     InteractionType,
     Node,
     NodeKind,
-    RetrievalLevel,
     Tier,
     VisualPolicy,
+    ZoomLevel,
 )
 
 GRAPH, ROOT_ID = load_graph()
@@ -24,7 +24,7 @@ __all__ = [
     "AnswerType",
     "Tier",
     "VisualPolicy",
-    "RetrievalLevel",
+    "ZoomLevel",
     "load_graph",
     "validate_graph",
 ]

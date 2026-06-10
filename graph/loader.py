@@ -10,27 +10,26 @@ from graph.schema import (
     InteractionType,
     Node,
     NodeKind,
-    RetrievalLevel,
     Tier,
     VisualPolicy,
+    ZoomLevel,
+    _RETRIEVAL_LEVEL_TO_ZOOM,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GRAPH_PATH = REPO_ROOT / "data" / "graph" / "execution_graph.jsonl"
 
 
-def _default_retrieval_level(node_kind: NodeKind, tier: Tier | None = None) -> RetrievalLevel:
-    if tier == Tier.GLOBAL_FEATURES:
-        return RetrievalLevel.MEDIUM
-    if tier in (Tier.LOCAL_FEATURES, Tier.INTEGRATION):
-        return RetrievalLevel.HIGH
-    if node_kind in (NodeKind.GLOBAL, NodeKind.COMPARTMENT):
-        return RetrievalLevel.MEDIUM
+def _default_zoom_level(node_kind: NodeKind, tier: Tier | None = None) -> ZoomLevel:
+    if tier == Tier.GLOBAL_FEATURES or node_kind == NodeKind.GLOBAL:
+        return ZoomLevel.X5
+    if node_kind == NodeKind.COMPARTMENT:
+        return ZoomLevel.X10
     if node_kind == NodeKind.LOCAL:
-        return RetrievalLevel.HIGH
+        return ZoomLevel.X20
     if node_kind in (NodeKind.INTEGRATION, NodeKind.REPORT):
-        return RetrievalLevel.HIGH
-    return RetrievalLevel.MEDIUM
+        return ZoomLevel.X20
+    return ZoomLevel.X10
 
 
 def _default_visual_policy(node_kind: NodeKind) -> VisualPolicy:
@@ -44,20 +43,28 @@ def _default_visual_policy(node_kind: NodeKind) -> VisualPolicy:
 def _parse_node(raw: dict[str, Any]) -> Node:
     node_kind = NodeKind(raw["node_kind"])
     tier = Tier(raw.get("tier", Tier.GLOBAL_FEATURES.value))
+    zoom_raw = raw.get("zoom_level")
     retrieval_raw = raw.get("retrieval_level")
     visual_raw = raw.get("visual_policy")
+    if zoom_raw:
+        zoom_level = ZoomLevel(zoom_raw)
+    elif retrieval_raw:
+        zoom_level = _RETRIEVAL_LEVEL_TO_ZOOM.get(
+            retrieval_raw, _default_zoom_level(node_kind, tier)
+        )
+    else:
+        zoom_level = _default_zoom_level(node_kind, tier)
     return Node(
         id=raw["id"],
         label=raw.get("label", raw["id"]),
         question=raw["question"],
+        description=str(raw.get("description") or ""),
         tier=tier,
         node_kind=node_kind,
         interaction=InteractionType(raw.get("interaction", "single_select")),
         options=list(raw.get("options") or []),
         edges=dict(raw.get("edges") or {}),
-        retrieval_level=RetrievalLevel(retrieval_raw)
-        if retrieval_raw
-        else _default_retrieval_level(node_kind, tier),
+        zoom_level=zoom_level,
         visual_policy=VisualPolicy(visual_raw)
         if visual_raw
         else _default_visual_policy(node_kind),
