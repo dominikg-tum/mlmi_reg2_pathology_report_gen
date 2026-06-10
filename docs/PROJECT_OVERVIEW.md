@@ -291,17 +291,17 @@ PathChat+ is the pathology-native VLM from SlideSeek ([arXiv:2506.20964](https:/
 | Thumbnail baseline (P1) | **Done on cluster** — `dataset/thumbnails/` (+ kmeans variants) | `vision/thumbnail.py`, `scripts/vision/build_thumbnail_cache.py` |
 | openslide tiling 512×512 | **Implemented** — four bands (×4/×10/×20/×40) | `vision/wsi_io.py`, `scripts/vision/tile_slides.py` |
 | CONCH patch encoder (4 pools) | **Partial** — via `TitanEncoder.return_conch()` only | `vision/encoders/titan.py`, `scripts/vision/encode_patches_offline.py` |
-| TITAN slide encoder | **Partial** — ×20-only slide emb; dim documented as 768 (should be 1024) | `scripts/vision/encode_slide_embeddings.py` |
-| K-means retrieval pool | **Implemented** — default `kmeans_k=100`; full-pool search optional | `retrieval/kmeans_index.py`, `scripts/vision/build_kmeans_index.py` |
-| CONCH/TITAN unified offline job | **Missing** — run tile → encode → kmeans as one entry point | `scripts/preprocess/run_offline_wsi` (planned) |
+| TITAN slide encoder | **Implemented** — ×20-only slide emb (1024-d); canonical `patch_embeddings_20x.pt` if missing | `scripts/vision/encode_slide_embeddings.py` |
+| K-means retrieval pool | **Implemented** — default `kmeans_k=100`; `--search-all-patches` ablation | `retrieval/kmeans_index.py`, `retrieval/titan_cosine.py` |
+| CONCH/TITAN unified offline job | **Implemented** — tile → verify → encode → kmeans → slide emb | `scripts/preprocess/run_offline_wsi.py`, `scripts/cluster/run_offline_wsi.sh` |
 | Graph-tier zoom retrieval | **Implemented** — `node.zoom_level` → pool; **`TitanEncoder.encode_text()`** query | `retrieval/graph_guided.py`, `retrieval/titan_cosine.py` |
-| Patch retrieval (cosine) | **Implemented** — K-means centroid pool + diversity filter | `retrieval/titan_cosine.py` |
-| HippoRAG 2 | **Stub only** | `memory/hipporag2.py` |
-| Per-node VLM | **Partial** — Qwen3-VL-8B via vLLM API; HF agent backend + PathChat+ TODO | `agent/backends.py` |
-| Phase 2 report LLM + slide projector | **Missing** — report = last graph node answer; staged LLM = **MedGemma 1.5 4B** | — |
-| cot_chain / report disk persistence | **Partial** — optional `--output` on run_agent | `baselines/run_agent.py` |
+| Patch retrieval (cosine) | **Implemented** — K-means centroid pool + diversity filter + full-pool flag | `retrieval/titan_cosine.py` |
+| HippoRAG 2 | **Partial** — embedding fallback for smoke tests; full KG TODO (NICK) | `memory/hipporag2.py`, `scripts/memory/build_hipporag_index.py` |
+| Per-node VLM | **Partial** — Qwen3-VL-8B via vLLM API; PathChat+ deploy TODO (§2d) | `agent/backends.py`, `scripts/inference/run_phase1.py` |
+| Phase 2 report LLM + slide projector | **Implemented** — MedGemma 1.5 4B + linear projector stub | `agent/report_writer.py`, `scripts/inference/run_phase2.py` |
+| cot_chain / report disk persistence | **Implemented** — `runs/{slide_id}/cot_chain.json`, `report.txt` | `scripts/inference/run_phase1.py`, `run_phase2.py` |
 | REG² chain metrics (BPV, Edge-F1, MESS) | **Implemented** | `eval/metrics/chain.py`, `eval/run_eval.py` |
-| Report → edge parser | **Missing** | — |
+| Report → edge parser | **Implemented** — `pred_edges.jsonl` + `build_predictions.py` | `eval/edge_parser.py`, `scripts/inference/build_predictions.py` |
 | Deployed VLMs + sibling repos | **Cluster only** — see §1 asset table | `/mnt/projects/mlmi/reg2/models/`, `repos/` |
 
 ---
