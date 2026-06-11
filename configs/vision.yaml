@@ -9,6 +9,10 @@ cache_root: /mnt/projects/mlmi/reg2/dominik/cache
 thumbnail:
   max_edge_px: 1024
   format: png
+  # Team flat JPEG banks (460 slides). Agent reads here first; falls back to cache_root/{slide_id}/thumbnail.png
+  dataset_root: /mnt/projects/mlmi/reg2/dataset
+  # thumbnails | thumbnails_kmeans | thumbnails_kmeans_5
+  variant: thumbnails_kmeans
 
 # Multi-scale tiling: native patch size per zoom → resize to conch_input_px before CONCH encode.
 magnification_bands:
@@ -64,4 +68,4 @@ titan:
   # Pinned runtime deps (install in enroot before encode): timm==1.0.3
   # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — use container torch; see load_paths.sh
   max_patches_per_slide: 512
-  batch_size: 64
+  batch_size: 16

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Submit offline WSI jobs within QOS MaxSubmit/MaxJobs limits (students: 2 jobs max).
 # Submits one array task at a time, waiting for a free slot before each sbatch.
+# Skips slides that already have required offline artifacts.
 #
 # Usage:
 #   bash scripts/cluster/submit_offline_wsi_batch.sh
@@ -29,6 +30,36 @@ done
 source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
 load_cluster_paths
 
+slide_artifacts_complete() {
+  local idx="$1"
+  python3 - "${REPO}" "${idx}" <<'PY'
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+sys.path.insert(0, str(repo))
+from scripts.vision._common import default_cache_root, default_data_dir, load_vision_config
+from vision.cache import slide_cache_dir
+from vision.wsi_io import resolve_wsi_files, slide_id_from_path
+
+vcfg = load_vision_config()
+data_dir = default_data_dir()
+cache_root = default_cache_root(vcfg)
+svs = resolve_wsi_files(data_dir, wsi_index=int(sys.argv[2]))[0]
+out_dir = slide_cache_dir(cache_root, slide_id_from_path(svs))
+required = [
+    "patch_embeddings_10x.pt",
+    "patch_embeddings_20x.pt",
+    "kmeans_centroids_10x.pt",
+    "kmeans_centroids_20x.pt",
+    "slide_embedding.pt",
+]
+missing = [name for name in required if not (out_dir / name).exists()]
+if missing:
+    raise SystemExit(1)
+PY
+}
+
 wait_for_slot() {
   while true; do
     local total wsi_running
@@ -45,10 +76,16 @@ wait_for_slot() {
 submitted=0
 skipped=0
 for idx in $(seq "${START}" "${END}"); do
+  if slide_artifacts_complete "${idx}"; then
+    echo "SKIP wsi-index ${idx} (artifacts complete)"
+    skipped=$((skipped + 1))
+    continue
+  fi
+
   wait_for_slot
   out=$(cd "${REPO}" && sbatch --array="${idx}" scripts/cluster/run_offline_wsi.sh)
   echo "${out} (wsi-index ${idx})"
   submitted=$((submitted + 1))
 done
 
-echo "Submitted ${submitted} jobs for wsi-index ${START}-${END} (skipped ${skipped})."
+echo "Done: submitted ${submitted}, skipped ${skipped} (wsi-index ${START}-${END})."

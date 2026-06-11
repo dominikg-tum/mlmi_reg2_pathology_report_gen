@@ -7,7 +7,13 @@ from pathlib import Path
 
 import numpy as np
 
-from vision.mag_config import VALID_ZOOM_LEVELS, normalize_zoom
+from vision.mag_config import (
+    VALID_THUMBNAIL_VARIANTS,
+    VALID_ZOOM_LEVELS,
+    load_vision_config,
+    normalize_zoom,
+    thumbnail_config,
+)
 
 
 @dataclass
@@ -109,13 +115,75 @@ def slide_cache_dir(cache_root: Path, slide_id: str) -> Path:
     return cache_root / safe
 
 
-def build_slide_cache(cache_root: Path, slide_id: str) -> SlideCache:
+def slide_id_to_stem(slide_id: str) -> str:
+    """TUM_Uterus_0001.svs → TUM_Uterus_0001 (matches dataset JPEG stems)."""
+    if slide_id.lower().endswith(".svs"):
+        return slide_id[:-4]
+    return slide_id
+
+
+def dataset_thumbnail_dir(vcfg: dict | None = None) -> Path | None:
+    """Configured team bank directory, or None if dataset thumbnails are disabled."""
+    tcfg = thumbnail_config() if vcfg is None else vcfg.get("thumbnail", {})
+    root = str(tcfg.get("dataset_root", "")).strip()
+    variant = str(tcfg.get("variant", "thumbnails")).strip()
+    if not root:
+        return None
+    if variant not in VALID_THUMBNAIL_VARIANTS:
+        raise ValueError(
+            f"thumbnail.variant must be one of {VALID_THUMBNAIL_VARIANTS}; got {variant!r}"
+        )
+    return Path(root).expanduser() / variant
+
+
+def dataset_thumbnail_path(slide_id: str, vcfg: dict | None = None) -> Path | None:
+    """Path under dataset/{variant}/ for this slide, if the file exists."""
+    bank = dataset_thumbnail_dir(vcfg)
+    if bank is None:
+        return None
+    stem = slide_id_to_stem(slide_id)
+    for ext in (".jpg", ".jpeg", ".png"):
+        path = bank / f"{stem}{ext}"
+        if path.exists():
+            return path
+    return None
+
+
+def cache_thumbnail_path(cache_root: Path, slide_id: str) -> Path | None:
+    """Per-slide offline thumbnail under cache_root/{slide_id}/."""
     d = slide_cache_dir(cache_root, slide_id)
-    thumb = d / "thumbnail.png"
+    for name in ("thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg"):
+        path = d / name
+        if path.exists():
+            return path
+    return None
+
+
+def resolve_thumbnail_path(
+    cache_root: Path,
+    slide_id: str,
+    *,
+    vcfg: dict | None = None,
+) -> Path | None:
+    """Dataset bank first (configs/vision.yaml), then per-slide cache_root artifact."""
+    vcfg = vcfg or load_vision_config()
+    return dataset_thumbnail_path(slide_id, vcfg) or cache_thumbnail_path(
+        cache_root, slide_id
+    )
+
+
+def build_slide_cache(
+    cache_root: Path,
+    slide_id: str,
+    *,
+    vcfg: dict | None = None,
+) -> SlideCache:
+    d = slide_cache_dir(cache_root, slide_id)
+    thumb = resolve_thumbnail_path(cache_root, slide_id, vcfg=vcfg)
     return SlideCache(
         slide_id=slide_id,
         cache_dir=d,
-        thumbnail_path=thumb if thumb.exists() else None,
+        thumbnail_path=thumb,
         slide_embedding_path=d / "slide_embedding.pt",
         evidence_dir=d / "evidence",
     )

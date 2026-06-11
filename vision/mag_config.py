@@ -65,6 +65,13 @@ def mag_band_to_zoom(mag_band: str) -> str:
     return normalize_zoom(mag_band)
 
 
+def thumbnail_config() -> dict:
+    return load_vision_config().get("thumbnail", {})
+
+
+VALID_THUMBNAIL_VARIANTS = ("thumbnails", "thumbnails_kmeans", "thumbnails_kmeans_5")
+
+
 def retrieval_config() -> dict:
     return load_vision_config().get("retrieval", {})
 

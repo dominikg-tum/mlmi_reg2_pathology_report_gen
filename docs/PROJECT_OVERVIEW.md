@@ -34,7 +34,40 @@ Build a system that, **given only a WSI at test time**, walks a **diagnostic gra
 | `/mnt/projects/mlmi/reg2/containers/` | Team `.sqsh` bases: `qwen25_graphrag.sqsh`, `qwen25.sqsh`, `qwen25_dev_updated.sqsh`, `qwen25_dev_v2.sqsh`; personal exports e.g. `dominik_20260529_base.sqsh`. **Each person creates their own** enroot env + export — follow §3 in `cluster_setup.md`. |
 | `/mnt/projects/mlmi/reg2/models/` | **Only these five today:** `Qwen3-VL-8B-Instruct`, `Qwen3-VL-30B-A3B-Instruct`, `InternVL3_5-8B`, `InternVL3_5-14B`, `medgemma-1.5-4b-it` — see [§2d](#2d-model-deployment-status) |
 | `/mnt/projects/mlmi/reg2/repos/` | Cloned code: `mlmi_reg2_pathology_report_gen`, `TITAN`, `Patho-R1`, `quilt-llava` |
-| `/mnt/projects/mlmi/reg2/dataset/` | Offline thumbnail caches: `thumbnails/`, `thumbnails_kmeans/`, `thumbnails_kmeans_5/` (**done**) |
+| `/mnt/projects/mlmi/reg2/dataset/` | Team thumbnail JPEG banks — see [§2a Thumbnail options](#2a-thumbnail-options-cluster) |
+
+---
+
+### 2a. Thumbnail options (cluster)
+
+Precomputed whole-slide JPEGs for Phase 1 (`--visual thumbnail`) live under a **shared flat directory** (not per-slide cache folders):
+
+```text
+/mnt/projects/mlmi/reg2/dataset/
+  thumbnails/              # default P1 baseline — openslide pyramid downsample, max edge 1024 px
+  thumbnails_kmeans/       # tissue-emphasized composite (k-means on low-res patches; k≈100)
+  thumbnails_kmeans_5/     # coarser tissue summary (k=5) — less glass, smaller files
+```
+
+| Directory | Files | Naming | Recommended use |
+|-----------|-------|--------|-----------------|
+| `thumbnails/` | 460 × `.jpg` | `TUM_Uterus_0001.jpg` (= stem of `TUM_Uterus_0001.svs`) | **Default baseline** while full tiling / CONCH encode runs |
+| `thumbnails_kmeans/` | 460 × `.jpg` | same | **Preferred thumbnail upgrade** — more tissue signal, less empty glass |
+| `thumbnails_kmeans_5/` | 460 × `.jpg` | same | **Ablation** — very coarse tissue overview; fastest VLM context |
+
+All three are valid Phase 1 inputs. Start with `thumbnails/` or `thumbnails_kmeans/`; use `thumbnails_kmeans_5/` only as an ablation (coarser global context).
+
+**How the agent resolves thumbnails**
+
+Set in `configs/vision.yaml` → `thumbnail.dataset_root` and `thumbnail.variant` (`thumbnails` \| `thumbnails_kmeans` \| `thumbnails_kmeans_5`). Inference loads:
+
+```text
+{dataset_root}/{variant}/{stem}.jpg     # e.g. …/thumbnails_kmeans/TUM_Uterus_0001.jpg
+```
+
+Falls back to `{cache_root}/{slide_id}/thumbnail.png` when the dataset file is missing (offline `build_thumbnail_cache` output).
+
+**While offline encode is running:** use any `dataset/` bank above for thumbnail-only Phase 1; switch to `--visual patch_retrieve --retriever graph_guided` per slide once `patch_embeddings_{zoom}.pt` exist under the same `cache_root`.
 
 ---
 
@@ -91,7 +124,7 @@ flowchart TD
 
 | Step | Spec | Artifact |
 |------|------|----------|
-| Thumbnail | `openslide` pyramid downsample, max edge 1024 px | `thumbnail.png` (**done** — `dataset/thumbnails/`) |
+| Thumbnail | `openslide` pyramid downsample, max edge 1024 px | `thumbnail.png` per slide under `cache_root/`; team JPEG banks in `dataset/thumbnails{,_kmeans,_kmeans_5}/` — see [§2a](#2a-thumbnail-options-cluster) |
 | Multi-scale tiling | Non-overlapping patches at **four zoom levels** (native px → resize to 224×224 before CONCH); **tissue filter:** mean grayscale ≤ 220 today — see [WSI_Background_Filtering.md](WSI_Background_Filtering.md) for planned upgrade | `coords_{5x,10x,20x,40x}.pt`, `meta_{zoom}.json` |
 | | **5×:** 2048×2048 → 224×224 | |
 | | **10×:** 1024×1024 → 224×224 | |
@@ -274,7 +307,7 @@ Build in this sequence — each step depends on the previous artifacts:
 | Component | Status | Location |
 |-----------|--------|----------|
 | Graph loader + deterministic traversal | **Partial** — seed graph has 3 nodes; traversal works | `graph/`, `agent/controller.py` |
-| Thumbnail baseline (P1) | **Done on cluster** — `dataset/thumbnails/` (+ kmeans variants) | `vision/thumbnail.py`, `scripts/vision/build_thumbnail_cache.py` |
+| Thumbnail baseline (P1) | **Done on cluster** — `dataset/thumbnails{,_kmeans,_kmeans_5}/`; `thumbnail.variant` in `configs/vision.yaml` | `vision/cache.py`, `vision/thumbnail.py` |
 | openslide tiling 512×512 | **Implemented** — four bands (×4/×10/×20/×40) | `vision/wsi_io.py`, `scripts/vision/tile_slides.py` |
 | CONCH patch encoder (4 pools) | **Partial** — via `TitanEncoder.return_conch()` only | `vision/encoders/titan.py`, `scripts/vision/encode_patches_offline.py` |
 | TITAN slide encoder | **Implemented** — ×20-only slide emb (1024-d); canonical `patch_embeddings_20x.pt` if missing | `scripts/vision/encode_slide_embeddings.py` |

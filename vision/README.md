@@ -34,4 +34,16 @@ Per slide cache layout:
 | Thumbnail | `thumbnail` | `build_thumbnail_cache.py` |
 | TITAN slide embed | `slide_embed` | `encode_slide_embeddings.py` |
 
+### Team thumbnail banks (`/mnt/projects/mlmi/reg2/dataset/`)
+
+Precomputed JPEGs (460 slides) — use while full CONCH/TITAN offline encode is in flight:
+
+| Directory | Use |
+|-----------|-----|
+| `thumbnails/` | Default pyramid downsample |
+| `thumbnails_kmeans/` | Tissue-emphasized (k≈100) — recommended over plain thumbnails |
+| `thumbnails_kmeans_5/` | Coarse tissue summary (k=5) — ablation |
+
+Select bank via `configs/vision.yaml` → `thumbnail.variant`. See [PROJECT_OVERVIEW.md §2a](../docs/PROJECT_OVERVIEW.md#2a-thumbnail-options-cluster).
+
 Data WSIs: `/mnt/projects/mlmi/reg2/TUMUntera` (see `configs/paths.yaml`).

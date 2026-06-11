@@ -58,9 +58,6 @@ def _encode_one(
 
     if coord_path.exists():
         coords = load_coords_from_pt(coord_path)
-        if max_patches > 0:
-            coords = coords[:max_patches]
-        patches = load_patches_from_coords(svs_path, coords, mag_band=level)
         meta_existing = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         patch_size_lv0 = int(meta_existing.get("patch_size_lv0", 0))
         if patch_size_lv0 <= 0:
@@ -72,21 +69,47 @@ def _encode_one(
         )
         if not patches:
             raise RuntimeError("no tissue patches")
+        emb = encoder.encode_patches(patches, batch_size=batch_size)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        torch.save({"embeddings": emb, "coords": np.asarray(coords)}, emb_path)
+        torch.save(np.asarray(coords, dtype=np.int64), coord_path)
+        meta = {
+            "slide_id": slide_id_from_path(svs_path),
+            "level": level,
+            "n_patches": len(patches),
+            "patch_size_lv0": patch_size_lv0,
+            "embedding_dim": int(emb.shape[1]) if emb.size else 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        print(f"OK  {slide_id_from_path(svs_path)} {level} n={len(patches)} -> {emb_path}")
+        return
 
-    emb = encoder.encode_patches(patches, batch_size=batch_size)
+    if max_patches > 0:
+        coords = coords[:max_patches]
+    if not coords:
+        raise RuntimeError("no tissue patches")
+
+    feats: list[np.ndarray] = []
+    for start in range(0, len(coords), batch_size):
+        chunk_coords = coords[start : start + batch_size]
+        patches = load_patches_from_coords(svs_path, chunk_coords, mag_band=level)
+        feats.append(encoder.encode_patches(patches, batch_size=batch_size))
+
+    emb = np.vstack(feats).astype(np.float32) if feats else np.zeros((0, 768), dtype=np.float32)
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save({"embeddings": emb, "coords": np.asarray(coords)}, emb_path)
     torch.save(np.asarray(coords, dtype=np.int64), coord_path)
     meta = {
         "slide_id": slide_id_from_path(svs_path),
         "level": level,
-        "n_patches": len(patches),
+        "n_patches": len(coords),
         "patch_size_lv0": patch_size_lv0,
         "embedding_dim": int(emb.shape[1]) if emb.size else 0,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     meta_path.write_text(json.dumps(meta, indent=2) + "\n")
-    print(f"OK  {slide_id_from_path(svs_path)} {level} n={len(patches)} -> {emb_path}")
+    print(f"OK  {slide_id_from_path(svs_path)} {level} n={len(coords)} -> {emb_path}")
 
 
 def _check_only(cache_root: Path, data_dir: Path, levels: list[str]) -> None:
@@ -130,7 +153,11 @@ def main() -> None:
     cache_root = args.cache_root or default_cache_root(vcfg)
     model_id = args.model_id or default_titan_model(vcfg=vcfg)
     levels = args.level or default_encode_levels()
-    batch_size = args.batch_size or int(vcfg.get("titan", {}).get("batch_size", 64))
+    titan_cfg = vcfg.get("titan", {})
+    batch_size = args.batch_size or int(titan_cfg.get("batch_size", 16))
+    max_patches = args.max_patches
+    if max_patches <= 0:
+        max_patches = int(titan_cfg.get("max_patches_per_slide", 0))
 
     if args.check_only:
         _check_only(cache_root, data_dir, levels)
@@ -160,7 +187,7 @@ def main() -> None:
                     out_dir,
                     level,
                     batch_size=batch_size,
-                    max_patches=args.max_patches,
+                    max_patches=max_patches,
                 )
                 done_path.write_text(datetime.now(timezone.utc).isoformat() + "\n")
                 if fail_path.exists():

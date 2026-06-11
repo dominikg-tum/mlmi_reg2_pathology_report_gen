@@ -21,8 +21,26 @@ ls /mnt/projects/mlmi/reg2
 | `models/` | Locally deployed VLMs (Qwen3-VL, InternVL, MedGemma, …) |
 | `scripts/` | Shared helper scripts |
 | `case_reports_to_korea_collaborators.xlsx` | Labels (`slide_ids`, `english_reports`, …) |
+| `dataset/` | Team thumbnail JPEG banks for Phase 1 — see below |
 | `requirements.txt` / `requirements_clean.txt` | Dependencies to install inside containers |
 | `dominik/` | Personal logs, cache, embeddings (`chmod 777`) |
+
+#### `dataset/` — thumbnail options (Phase 1, no CONCH required)
+
+```bash
+ls /mnt/projects/mlmi/reg2/dataset
+# thumbnails  thumbnails_kmeans  thumbnails_kmeans_5
+```
+
+| Directory | Role |
+|---|---|
+| `thumbnails/` | Default blurry whole-slide downsample (max edge 1024 px) |
+| `thumbnails_kmeans/` | Tissue-emphasized composite (k≈100) — good default while patch encode runs |
+| `thumbnails_kmeans_5/` | Coarser tissue summary (k=5) — ablation only |
+
+460 slides each, named `TUM_Uterus_XXXX.jpg` (stem of `TUM_Uterus_XXXX.svs`).
+
+Pick the bank in `configs/vision.yaml` → `thumbnail.variant` (`thumbnails` \| `thumbnails_kmeans` \| `thumbnails_kmeans_5`); `thumbnail.dataset_root` points at `/mnt/projects/mlmi/reg2/dataset`. Falls back to `{cache_root}/{slide_id}/thumbnail.png` if missing. Full detail: [PROJECT_OVERVIEW.md §2a](PROJECT_OVERVIEW.md#2a-thumbnail-options-cluster).
 
 This repository should be cloned to:
 

@@ -67,7 +67,7 @@ On a 512×512 tile that is 90% glass, Otsu often splits noise/artifacts rather t
 ### Why a slide-level mask?
 
 - One mask per WSI, reused for 5× / 10× / 20× / 40× tiling (same level-0 coordinate grid)
-- Thumbnails already exist on cluster (`/mnt/projects/mlmi/reg2/dataset/thumbnails/`)
+- Thumbnails already exist on cluster — `dataset/thumbnails/`, `thumbnails_kmeans/`, `thumbnails_kmeans_5/` (see [PROJECT_OVERVIEW.md §2a](PROJECT_OVERVIEW.md#2a-thumbnail-options-cluster))
 - Matches common WSI practice (CLAM-style pipelines, MahmoodLab ecosystem expectations)
 - Easy to QA in `verify_tiling.py` (mask overlay + patch count before CONCH)
 
