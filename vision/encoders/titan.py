@@ -30,6 +30,8 @@ class TitanEncoder:
         ).to(dev)
         self._titan.eval()
         self._conch, self._transform = self._titan.return_conch()
+        self._conch = self._conch.to(dev)
+        self._conch.eval()
 
     def encode_patches(self, patch_images: list, *, batch_size: int = 32) -> np.ndarray:
         """Return [N, D] CONCH/TITAN patch features."""
@@ -40,8 +42,8 @@ class TitanEncoder:
         for start in range(0, len(patch_images), batch_size):
             batch = patch_images[start : start + batch_size]
             tensors = torch.stack([self._transform(img) for img in batch])
-            tensors = tensors.to(self.device)
-            with torch.autocast(self.device, torch.float16), torch.inference_mode():
+            tensors = tensors.to(self.device, dtype=torch.float32)
+            with torch.inference_mode():
                 out = self._conch(tensors)
             if isinstance(out, dict):
                 out = out.get("embeddings", out.get("pooler_output", next(iter(out.values()))))
@@ -62,9 +64,9 @@ class TitanEncoder:
 
         if patch_features.size == 0:
             raise ValueError("Cannot encode slide from zero patches")
-        features = torch.from_numpy(patch_features)
+        features = torch.from_numpy(patch_features).float()
         coord_t = torch.from_numpy(np.asarray(coords, dtype=np.int64))
-        with torch.autocast(self.device, torch.float16), torch.inference_mode():
+        with torch.inference_mode():
             slide = self._titan.encode_slide_from_patch_features(
                 features.to(self.device),
                 coord_t.to(self.device),

@@ -58,17 +58,19 @@ EOF
 }
 
 # MahmoodLab/TITAN pinned stack (HF model card requirements).
-# torch/timm/einops/transformers must match — transformers>=5 breaks trust_remote_code load.
+# Use container torch (CUDA 13 base); pin timm/einops/transformers — transformers>=5 breaks trust_remote_code.
 cluster_offline_pip_snippet() {
   cat <<'EOF'
-pip install -q torch==2.0.1 timm==1.0.3 einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 openslide-python pillow pyyaml tqdm huggingface_hub scikit-learn 2>/dev/null || true
+pip install -q timm==1.0.3 einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0
+pip install -q openslide-python pillow pyyaml tqdm huggingface_hub scikit-learn 2>/dev/null || true
 EOF
 }
 
 # Lighter pip set for encode-only GPU jobs (same TITAN pins).
 cluster_titan_pip_snippet() {
   cat <<'EOF'
-pip install -q torch==2.0.1 timm==1.0.3 einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 openslide-python pillow pyyaml tqdm huggingface_hub 2>/dev/null || true
+pip install -q timm==1.0.3 einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0
+pip install -q openslide-python pillow pyyaml tqdm huggingface_hub 2>/dev/null || true
 EOF
 }
 

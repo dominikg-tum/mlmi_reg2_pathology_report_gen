@@ -61,7 +61,7 @@ defaults:
 
 titan:
   model_id: MahmoodLab/TITAN
-  # Pinned runtime deps (install in enroot before encode): torch==2.0.1 timm==1.0.3
-  # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — see scripts/cluster/load_paths.sh
+  # Pinned runtime deps (install in enroot before encode): timm==1.0.3
+  # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — use container torch; see load_paths.sh
   max_patches_per_slide: 512
   batch_size: 64

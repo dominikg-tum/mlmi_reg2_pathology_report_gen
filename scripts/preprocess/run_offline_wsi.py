@@ -13,7 +13,34 @@ from scripts.vision._common import (
     default_encode_levels,
     load_vision_config,
 )
-from vision.wsi_io import resolve_wsi_files
+from vision.cache import slide_cache_dir
+from vision.wsi_io import resolve_wsi_files, slide_id_from_path
+
+
+def _validate_artifacts(
+    cache_root: Path,
+    svs_files: list[Path],
+    *,
+    levels: list[str] | None = None,
+) -> None:
+    """Exit non-zero if required 10x/20x offline artifacts are missing (5x optional)."""
+    levels = levels or default_encode_levels()
+    required_levels = [lv for lv in ("10x", "20x") if lv in levels]
+    missing: list[str] = []
+    for svs_path in svs_files:
+        sid = slide_id_from_path(svs_path)
+        out_dir = slide_cache_dir(cache_root, sid)
+        for lv in required_levels:
+            for stem in (f"patch_embeddings_{lv}.pt", f"kmeans_centroids_{lv}.pt"):
+                if not (out_dir / stem).exists():
+                    missing.append(f"{sid}/{stem}")
+        if not (out_dir / "slide_embedding.pt").exists():
+            missing.append(f"{sid}/slide_embedding.pt")
+    if missing:
+        raise SystemExit(
+            "Offline pipeline finished but required artifacts are missing:\n  "
+            + "\n  ".join(missing)
+        )
 
 
 def _run_module(module: str, extra_args: list[str]) -> None:
@@ -94,6 +121,10 @@ def main() -> None:
     if not args.skip_slide_emb:
         _run_module("scripts.vision.encode_slide_embeddings", common)
 
+    svs_files = resolve_wsi_files(
+        data_dir, slide=args.slide, wsi_index=args.wsi_index
+    )
+    _validate_artifacts(cache_root, svs_files, levels=levels)
     print(f"Offline pipeline complete -> {cache_root}")
 
 
