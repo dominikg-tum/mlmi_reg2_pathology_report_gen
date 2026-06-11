@@ -5,7 +5,9 @@ from graph.schema import NodeKind, VisualPolicy, ZoomLevel
 def test_load_seed_graph():
     graph, root = load_graph()
     assert root == "organ_procedure"
-    assert len(graph) == 3
+    assert len(graph) >= 3
+    assert "endometrium_adequacy" in graph
+    assert "integration_synopsis" in graph
     validate_graph(graph)
 
 

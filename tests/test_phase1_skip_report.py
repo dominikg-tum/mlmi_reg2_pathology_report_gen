@@ -7,7 +7,7 @@ def test_skip_report_nodes_stops_before_report():
     steps = traverse(DummyBackend(), skip_report_nodes=True)
     assert steps
     assert all(GRAPH[s.node_id].node_kind.value != "report" for s in steps)
-    assert steps[-1].node_id == "compartment"
+    assert steps[-1].node_id == "integration_synopsis"
 
 
 def test_chain_to_dict_omits_report_when_requested():

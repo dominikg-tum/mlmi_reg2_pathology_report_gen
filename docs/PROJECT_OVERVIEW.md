@@ -400,6 +400,10 @@ python -m baselines.run_agent --memory flat --visual thumbnail --navigator graph
 python -m baselines.run_agent --backend qwen --visual patch_retrieve --retriever graph_guided --slide-id CASE.svs
 # Primary path: node.zoom_level → one of four CONCH pools (not a flat pool)
 
+# WP3 — ground-truth chains from reports (requires vLLM)
+python -m scripts.extraction.build_chains_from_graph --limit 5
+python -m scripts.memory.build_hipporag_index --split train
+
 # Eval
 python -m eval.run_eval --pred runs/predictions.jsonl --gt data/labels/chains.jsonl --split test
 
