@@ -228,6 +228,9 @@ data/*
 # Large PDF references (keep locally; markdown docs are tracked)
 docs/*.pdf
 
+# Local cluster SSH overrides (scripts/local/cluster_env.local.sh)
+scripts/local/cluster_env.local.sh
+
 # Run outputs
 runs/
 

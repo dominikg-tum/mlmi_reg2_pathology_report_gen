@@ -1,0 +1,6 @@
+# Copy to cluster_env.local.sh and edit (optional; not committed).
+#
+#   cp scripts/local/cluster_env.local.sh.example scripts/local/cluster_env.local.sh
+
+CLUSTER_SSH_HOST="dominikgarstenauer@head.garching.camp.cluster"
+PINNED_REPO="/mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen"
