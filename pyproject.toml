@@ -16,6 +16,10 @@ dev = [
     "pytest>=7.0",
     "openai>=1.0",
 ]
+frontend = [
+    "streamlit>=1.32",
+    "openai>=1.0",
+]
 # Install on cluster inside enroot for TITAN/CONCH offline encode (pins from MahmoodLab/TITAN; use container torch)
 cluster = [
     "timm==1.0.3",

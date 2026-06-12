@@ -176,9 +176,17 @@ Output: `runs/{slide_id}/cot_chain.json`
 
 ### Phase 2 — Report generation
 
-1. Serialize `cot_chain` as JSON string  
-2. Project `slide_emb` (1024-d) through learned linear layer → 4096-d → `[SLIDE]` prefix token  
-3. Prompt **medgemma-1.5-4b-it** (text-only, same GPU after VLM unload): CoT + slide prefix → CAP-format report  
+**Target design (REG² / embedding-decoder lineage):**
+
+1. Serialize `cot_chain` as text  
+2. Load frozen **TITAN** `slide_embedding.pt` (1024-d, ×20 pool)  
+3. **Trained** adapter maps slide emb → report-LLM conditioning (linear projector or small cross-attn — not a random layer)  
+4. Generate CAP report with **MedGemma 1.5 4B**  
+
+**As implemented today (`agent/report_writer.py`):** chain text only. MedGemma is loaded as a **text-only** causal LM; the TITAN projector exists but is **untrained** and the projected vector is **not injected** into the model — only a text note in the prompt. Treat Phase 2 baseline as **cot_chain → MedGemma** until real prefix injection or native MedGemma image input is wired.
+
+**MedGemma 1.5 4B (model card):** native **multimodal** input — text + histopathology **images** (896×896, multiple WSI patches). That is often a **better intended path** than piping TITAN vectors through an untrained linear layer. See [§2e — Images vs embeddings](#2e-images-vs-embeddings--when-to-use-what).
+
 4. Parse report into reasoning-graph edges for REG² eval  
 
 Output: `runs/{slide_id}/report.txt`, `runs/{slide_id}/pred_edges.jsonl`
@@ -190,7 +198,7 @@ Two **different** model jobs — do not reuse the same weights for both phases w
 | Phase | Job | Input | Output |
 |-------|-----|-------|--------|
 | **1** | Per-node patch VLM (graph answerer) | top-k **raw patch images** + node question + HippoRAG context | Structured node answer → `cot_chain` |
-| **2** | Final report LLM | Serialized `cot_chain` + projected TITAN slide emb (text-only) | CAP-format pathology report |
+| **2** | Final report LLM | Serialized `cot_chain` (+ optional slide context: TITAN emb **or** MedGemma-native patch/thumbnail images) | CAP-format pathology report |
 
 Cluster weights live under `/mnt/projects/mlmi/reg2/models/`. **Only five models are staged today** — plan below uses what is on disk; see [§2d](#2d-model-deployment-status) for optional future downloads.
 
@@ -210,12 +218,12 @@ Cluster weights live under `/mnt/projects/mlmi/reg2/models/`. **Only five models
 
 | Model | Params | Relevant strength | Weakness | On cluster |
 |-------|--------|-------------------|----------|------------|
-| **MedGemma 1.5 4B** | 4B | **Current default** — 335K WSI→report pairs; medical reasoning | Smaller; CAP instruction-following untested | ✅ **default Phase 2** |
-| **Qwen3-VL-8B-Instruct** | 8B | On cluster | Vision LM — wasteful for text-only report stage | ✅ wrong role for Phase 2 |
+| **MedGemma 1.5 4B** | 4B | **Current default** — WSI→report pretraining; native **multimodal** (patches/thumbnail + text) in model card | Our code path is text-only today; CAP format untested | ✅ **default Phase 2** |
+| **Qwen3-VL-8B-Instruct** | 8B | On cluster; can take thumbnail + patch **images** at report stage | General VLM; not pathology-report-specialized | ✅ Phase 2 **ablation** (chain + images) |
 | **InternVL3.5** | 8B / 14B | On cluster | Vision LM — wrong role | ❌ Phase 2 |
 | **Qwen2.5-7B-Instruct** | 7B | Strong CAP instruction-following | Not staged | ❌ optional future download |
 
-**Verdict — Phase 2 (current plan):** **medgemma-1.5-4b-it** is the only staged report LLM — use it for Phase 2 now. **Run a quick CAP-format test** on 5–10 slides and tune prompts before locking eval defaults.
+**Verdict — Phase 2 (current plan):** **Now:** cot_chain → **MedGemma** (text baseline). **Next:** wire MedGemma **multimodal** (chain + key WSI patches or thumbnail) *or* a **trained** TITAN→decoder adapter (REG²-style). Ablate **Qwen3-VL-8B** with chain + thumbnail/patches vs MedGemma chain-only / chain+images.
 
 #### Where InternVL3.5 fits in the pipeline
 
@@ -241,9 +249,83 @@ flowchart LR
 | **8B zero-shot** | 1 | Ablation baseline vs **Qwen3-VL-8B** (current default) |
 | **8B + LoRA** | 1 | Specialized node answerer after uterus-graph fine-tune |
 | **14B** | 1 | Upper-bound ablation (2× GPU) |
-| **8B / 14B** | 2 | **Not used** — text-only report stage |
+| **8B / 14B** | 2 | **Ablation only** — chain + images if needed |
 
-**Practical order (with current weights only):** (1) offline artifacts + K-means index → (2) Phase 1 with **Qwen3-VL-8B** + `graph_guided` retrieval → (3) HippoRAG 2 real index → (4) Phase 2 projector + **MedGemma 1.5 4B** report writer → (5) eval edge parser → (6) LoRA **InternVL3.5-8B** ablation.
+**Practical order (with current weights only):** (1) offline artifacts + K-means index → (2) Phase 1 with **Qwen3-VL-8B** + `graph_guided` retrieval → (3) HippoRAG 2 real index → (4) Phase 2 **chain-only MedGemma** baseline, then multimodal or TITAN adapter → (5) eval edge parser → (6) LoRA **InternVL3.5-8B** ablation.
+
+---
+
+## 2e. Images vs embeddings — when to use what
+
+This section answers: *Why raw patches in Phase 1 but vectors in Phase 2? Are embeddings “better”? Can we plug TITAN/KEEP into a VLM directly?*
+
+### Core rule
+
+| Representation | Best for | Why |
+|----------------|----------|-----|
+| **Raw patch / thumbnail images** | **VLMs** (Qwen, InternVL, MedGemma vision path) | Model was trained on **pixels** (or its own SigLIP tokens). It cannot read arbitrary 768-d/1024-d vectors without an **adapter trained for that encoder**. |
+| **Frozen embeddings** (CONCH, TITAN, KEEP) | **Retrieval, indexing, similarity, decoders** | Compact, fast, good for cosine search and **embedding→text decoders** (BioBART-style REG² winners). |
+| **Embeddings → VLM** | Only with a **learned bridge** | e.g. trained projector, Q-Former, or encoder co-trained with the LLM. **Random linear layer on few samples will not work well.** |
+
+**Embeddings carry more structured information per byte than one downsampled thumbnail** — but only if the **downstream model knows that space**. A general VLM does not understand TITAN 1024-d any more than it understands KEEP 768-d unless you train the interface.
+
+### Phase 1 — why raw images, not CONCH/TITAN vectors?
+
+Per graph node the agent must answer a **fine-grained visual question** (“glandular architecture”, “LVSI”, …). VLMs need **local pixels** at the right magnification. We use embeddings **offline** to **find** those patches (`encode_text` × CONCH pool → cosine → load raw PNGs). That split is standard and matches SlideSeek’s *evidence from inspection*, not *evidence from dot product in prompt text*.
+
+`--visual slide_embed` (P1 ablation) still sends **thumbnail + evidence patch images** to the VLM; TITAN `slide_embedding.pt` is attached for logging / future use, **not** as LLM input tokens today.
+
+### Phase 2 — three sensible options (not all implemented)
+
+| Option | Mechanism | Fits REG² / SlideSeek? | Our status |
+|--------|-----------|------------------------|------------|
+| **A. Chain-only text** | MedGemma(text = cot_chain) | SlideSeek synthesis stage without re-looking at slide | ✅ **current code** |
+| **B. Multimodal report** | MedGemma or Qwen(**images** + chain text) — e.g. thumbnail + top evidence patches from Phase 1 | SlideSeek re-grounds report in visuals; MedGemma 1.5 supports WSI patches natively | ❌ not wired |
+| **C. Embedding decoder** | Frozen CONCH/TITAN (+ aux objectives) → **trained** text decoder (REG² top methods used BioBART; we planned linear→MedGemma prefix) | **Yes — challenge lineage** | ⚠️ stub only (untrained projector, no token injection) |
+
+**Recommendation for ablations (small dev set first):**
+
+1. **MedGemma:** cot_chain only (baseline)  
+2. **MedGemma:** cot_chain + **native images** (thumbnail or 3–5 key patches) — likely **best MedGemma-native path**  
+3. **Qwen3-VL-8B:** cot_chain + same images (fair cross-model comparison)  
+4. **TITAN projector → MedGemma** — only after **≥ dozens–hundreds** of (chain, slide_emb, report) training pairs; do not expect gains from 5–10 samples + random init  
+
+Do **not** feed `slide_embedding.pt` into Qwen as raw numbers — it will not work. Feed **images**, or train a proper adapter.
+
+### SlideSeek vs REG² lessons (how our stack maps)
+
+| Source | Lesson | Our adoption |
+|--------|--------|--------------|
+| **SlideSeek** | Iterative **visual** evidence → chain → **separate report synthesis** | Phase 1 patches/thumbnail to VLM; Phase 2 report writer; fixed graph instead of learned navigator |
+| **REG² / MICCAI challenge winners** | **Fuse WSI embeddings** (CONCH + TITAN + aux) → **text decoder** for report; embeddings excel at slide-level synthesis | TITAN `slide_embedding.pt` + planned adapter (option C); CONCH pools for retrieval not report tokens |
+| **PathChat+** (SlideSeek internals) | Pathology-native VLM on pixels | Open substitute: Qwen / InternVL LoRA |
+
+SlideSeek says **look at images while reasoning**; REG² winners say **compress slide to vectors then decode report**. Both are valid — we use **images in Phase 1** and aim for **either MedGemma images or TITAN→decoder in Phase 2**, not TITAN vectors in the node VLM.
+
+### KEEP ([MAGIC-AI4Med/KEEP](https://github.com/MAGIC-AI4Med/KEEP)) — future, not on cluster
+
+Your colleague is right about the **ontology alignment**: KEEP embeddings are trained with **hierarchical disease semantics**, which matches a tiered uterus graph better than generic CLIP-style space.
+
+| Use KEEP where | Rationale |
+|----------------|-----------|
+| **Retrieval** (replace or augment CONCH text×vision cosine) | Query with node ontology text → KEEP patch/slide similarity |
+| **Phase 2 decoder input** (with trained fusion) | Same REG² pattern as CONCH+TITAN→BioBART, if KEEP is fused offline |
+
+| Do not assume | Rationale |
+|---------------|-----------|
+| **Drop-in KEEP vectors into Qwen/InternVL** | No shared training with that VLM — need adapter or use KEEP only for retrieval then pass **images** |
+| **Immediate swap** | KEEP not staged; `training/README.md` documents KEEP-style **ontology grouping for LoRA data** as a **future ablation**, not current inference |
+
+**Practical order:** lock CONCH/TITAN offline pipeline → Phase 1/2 baselines → eval → then experiment KEEP for **retrieval** or **decoder fusion** on train split only.
+
+### Training sample size (projector / adapters)
+
+| Component | Few samples (5–20 slides)? | Needs more data? |
+|-----------|----------------------------|------------------|
+| LoRA Phase 1 VLM (InternVL) | Maybe — if tasks are narrow multiple-choice | Hundreds+ node samples ideal |
+| Linear TITAN→MedGemma projector | **Unlikely to help** | Treat like training a small head on (emb, report) pairs |
+| MedGemma multimodal prompt tuning | Prompt/format only | Fine-tune if reports still poor |
+| Chain-only MedGemma | **Zero-shot OK** to start | Prompt engineering first |
 
 ---
 
@@ -317,7 +399,7 @@ Build in this sequence — each step depends on the previous artifacts:
 | Patch retrieval (cosine) | **Implemented** — K-means centroid pool + diversity filter + full-pool flag | `retrieval/titan_cosine.py` |
 | HippoRAG 2 | **Partial** — embedding fallback for smoke tests; full KG TODO (NICK) | `memory/hipporag2.py`, `scripts/memory/build_hipporag_index.py` |
 | Per-node VLM | **Partial** — Qwen3-VL-8B via vLLM API | `agent/backends.py`, `scripts/inference/run_phase1.py` |
-| Phase 2 report LLM + slide projector | **Implemented** — MedGemma 1.5 4B + linear projector stub | `agent/report_writer.py`, `scripts/inference/run_phase2.py` |
+| Phase 2 report LLM + slide projector | **Partial** — MedGemma text-only chain baseline; projector stub (no trained injection). **Target:** multimodal MedGemma patches *or* trained TITAN→decoder | `agent/report_writer.py`, `scripts/inference/run_phase2.py` |
 | cot_chain / report disk persistence | **Implemented** — `runs/{slide_id}/cot_chain.json`, `report.txt` | `scripts/inference/run_phase1.py`, `run_phase2.py` |
 | REG² chain metrics (BPV, Edge-F1, MESS) | **Implemented** | `eval/metrics/chain.py`, `eval/run_eval.py` |
 | Report → edge parser | **Implemented** — `pred_edges.jsonl` + `build_predictions.py` | `eval/edge_parser.py`, `scripts/inference/build_predictions.py` |

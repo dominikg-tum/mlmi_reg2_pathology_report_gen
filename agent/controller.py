@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agent.answers import normalize_answer
 from agent.backends import AnswerBackend
 from agent.correction import check_consistency, should_retry
 from agent.memory import CaseMemory, GraphStore, JsonGraphStore
 from agent.types import Step
 from graph import GRAPH, ROOT_ID, Node
-from graph.schema import InteractionType, NodeKind
+from graph.schema import NodeKind
 from retrieval.base import PatchRetriever, get_retriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
@@ -22,12 +23,6 @@ def build_query(node: Node, memory: list[Step]) -> str:
         return node.question
     context = "; ".join(f"{s.question} -> {s.answer}" for s in memory)
     return f"Given: {context}. {node.question}"
-
-
-def _format_answer(node: Node, raw: str) -> str:
-    if node.interaction == InteractionType.MULTI_SELECT:
-        return raw.strip()
-    return raw.strip()
 
 
 def traverse(
@@ -46,6 +41,7 @@ def traverse(
     wsi_data_dir: Path | None = None,
     max_steps: int = 64,
     confidence_threshold: float = 0.65,
+    max_answer_attempts: int = 2,
     skip_report_nodes: bool = False,
     search_all_patches: bool = False,
     retrieval_log: list[dict[str, Any]] | None = None,
@@ -97,17 +93,37 @@ def traverse(
                     }
                 )
         extra = mem.retrieve_context(node, query)
-        answer, confidence = backend.answer(
-            node, visual_bundle, steps, extra_context=extra
-        )
-        answer = _format_answer(node, answer)
-
-        if should_retry(confidence, confidence_threshold):
-            answer_retry, conf_retry = backend.answer(
-                node, visual_bundle, steps, extra_context=extra + "\n[Retry: reconsider]"
+        answer = ""
+        confidence = 0.0
+        last_raw = ""
+        for attempt in range(max_answer_attempts):
+            retry_note = ""
+            if attempt:
+                retry_note = (
+                    "\nRetry instruction: your previous response was not a valid graph "
+                    "answer. Return exactly one allowed answer key and nothing else."
+                )
+            raw, raw_confidence = backend.answer(
+                node,
+                visual_bundle,
+                steps,
+                extra_context=extra + retry_note,
             )
-            if conf_retry > confidence:
-                answer, confidence = _format_answer(node, answer_retry), conf_retry
+            last_raw = raw
+            normalized = normalize_answer(raw, node)
+            if normalized is None:
+                continue
+            if not answer or raw_confidence > confidence:
+                answer, confidence = normalized, raw_confidence
+            if not should_retry(confidence, confidence_threshold):
+                break
+
+        if not answer:
+            raise ValueError(
+                f"VLM failed to answer node {node.id!r} after "
+                f"{max_answer_attempts} attempts. Last response: {last_raw!r}; "
+                f"expected one of: {node.options}"
+            )
 
         _ = check_consistency(steps, node, answer)
 

@@ -225,6 +225,10 @@ Fallback without uv: `pip install -r requirements.txt`
 ```bash
 pytest tests/
 
+# Streamlit agent frontend
+uv sync --extra frontend
+streamlit run app.py
+
 # P1 agent — thumbnail, no TITAN
 python -m baselines.run_agent --backend dummy --memory flat --visual thumbnail
 
