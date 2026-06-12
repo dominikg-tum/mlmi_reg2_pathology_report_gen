@@ -27,7 +27,7 @@ done
 echo "Syncing → ${CLUSTER_SSH_HOST}:${PINNED_REPO}"
 _cluster_ssh "mkdir -p '${PINNED_REPO}'"
 
-rsync -avz "${DRY_RUN[@]}" \
+rsync -avz -e "ssh -o ForwardX11=no" "${DRY_RUN[@]}" \
   --exclude '.git/' \
   --exclude '__pycache__/' \
   --exclude '.pytest_cache/' \

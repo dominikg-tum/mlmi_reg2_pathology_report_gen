@@ -13,7 +13,17 @@ MAX_WSI_JOBS="${MAX_WSI_JOBS:-2}"
 POLL_SEC="${POLL_SEC:-30}"
 
 _cluster_ssh() {
-  ssh -o BatchMode=yes "${CLUSTER_SSH_HOST}" "$@"
+  ssh -o BatchMode=yes -o ForwardX11=no "${CLUSTER_SSH_HOST}" "$@"
+}
+
+# Parse wsi-index from squeue %i field (e.g. 10709_120 → 120).
+_wsi_index_from_squeue_id() {
+  local job_id="$1"
+  if [[ "${job_id}" == *_* ]]; then
+    echo "${job_id##*_}"
+  else
+    echo "?"
+  fi
 }
 
 # Local repo root (directory containing scripts/local/)

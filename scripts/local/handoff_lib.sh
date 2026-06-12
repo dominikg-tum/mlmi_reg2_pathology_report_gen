@@ -15,9 +15,9 @@ stop_cluster_batch_submitter() {
   fi
 }
 
-# Prints one line: "job_id array_task" per running wsi-offline job, or nothing.
+# Prints one line per running wsi-offline job: SLURM job id (%i, e.g. 10709_120).
 list_running_wsi_jobs() {
-  _cluster_ssh "squeue -u \"\$(whoami)\" -n wsi-offline-pipeline -h -o '%i %a' 2>/dev/null" || true
+  _cluster_ssh "squeue -u \"\$(whoami)\" -n wsi-offline-pipeline -h -o '%i' 2>/dev/null" || true
 }
 
 wait_for_wsi_jobs_drain() {
@@ -31,8 +31,8 @@ wait_for_wsi_jobs_drain() {
   echo "Waiting for in-flight wsi-offline job(s) to finish (shared-repo code; not interrupted):"
   for line in "${_running[@]}"; do
     [[ -z "${line// /}" ]] && continue
-    job_id="${line%% *}"
-    task="${line##* }"
+    job_id="${line// /}"
+    task=$(_wsi_index_from_squeue_id "${job_id}")
     echo "  job ${job_id} wsi-index ${task}"
   done
 

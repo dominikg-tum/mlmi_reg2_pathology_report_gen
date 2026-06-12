@@ -56,7 +56,8 @@ if ((${#_initial[@]} > 0)) && [[ -n "${_initial[0]// /}" ]]; then
   echo "Detected running job(s):"
   for line in "${_initial[@]}"; do
     [[ -z "${line// /}" ]] && continue
-    echo "  ${line} (wsi-index ${line##* })"
+    job_id="${line// /}"
+    echo "  job ${job_id} (wsi-index $(_wsi_index_from_squeue_id "${job_id}"))"
   done
 else
   echo "No wsi-offline job running right now."
