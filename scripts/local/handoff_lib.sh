@@ -46,10 +46,12 @@ wait_for_wsi_jobs_drain() {
   done
 }
 
-# First wsi-index without full offline artifacts (uses NFS cache; repo only for imports).
+# First wsi-index without full offline artifacts (single .svs listing on head).
 remote_first_incomplete_index() {
   local repo="${1:-${PINNED_REPO}}"
-  _cluster_ssh "python3 - '${repo}'" <<'PY'
+  local out rc
+  echo "Scanning cache for first incomplete wsi-index (one .svs listing on head)..." >&2
+  if ! out=$(_cluster_ssh "python3 - '${repo}'" 2>&1 <<'PY'
 import sys
 from pathlib import Path
 
@@ -57,28 +59,76 @@ repo = Path(sys.argv[1])
 sys.path.insert(0, str(repo))
 from scripts.vision._common import default_cache_root, default_data_dir, load_vision_config
 from vision.cache import slide_cache_dir
-from vision.wsi_io import resolve_wsi_files, slide_id_from_path
+from vision.wsi_io import find_svs_files, slide_id_from_path
 
 vcfg = load_vision_config()
 data_dir = default_data_dir()
 cache_root = default_cache_root(vcfg)
-required = [
+required = (
     "patch_embeddings_10x.pt",
     "patch_embeddings_20x.pt",
     "kmeans_centroids_10x.pt",
     "kmeans_centroids_20x.pt",
     "slide_embedding.pt",
-]
-for idx in range(460):
-    try:
-        svs = resolve_wsi_files(data_dir, wsi_index=idx)[0]
-        out_dir = slide_cache_dir(cache_root, slide_id_from_path(svs))
-    except Exception:
+)
+files = find_svs_files(data_dir)
+for idx, svs in enumerate(files):
+    out_dir = slide_cache_dir(cache_root, slide_id_from_path(svs))
+    if not all((out_dir / name).exists() for name in required):
         print(idx)
         raise SystemExit(0)
-    if not all((out_dir / n).exists() for n in required):
-        print(idx)
-        raise SystemExit(0)
-print(460)
+print(len(files))
 PY
+  ); then
+    echo "ERROR: remote_first_incomplete_index failed on head:" >&2
+    echo "${out}" >&2
+    return 1
+  fi
+  echo "${out}" | tail -1 | tr -d '[:space:]'
+}
+
+# True if slide at wsi-index has all required cache artifacts (one .svs listing per call).
+remote_slide_complete() {
+  local idx="$1"
+  local repo="${2:-${PINNED_REPO}}"
+  _cluster_ssh "python3 - '${repo}' '${idx}'" <<'PY'
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+idx = int(sys.argv[2])
+sys.path.insert(0, str(repo))
+from scripts.vision._common import default_cache_root, default_data_dir, load_vision_config
+from vision.cache import slide_cache_dir
+from vision.wsi_io import find_svs_files, slide_id_from_path
+
+vcfg = load_vision_config()
+data_dir = default_data_dir()
+cache_root = default_cache_root(vcfg)
+files = find_svs_files(data_dir)
+if idx < 0 or idx >= len(files):
+    raise SystemExit(1)
+out_dir = slide_cache_dir(cache_root, slide_id_from_path(files[idx]))
+required = (
+    "patch_embeddings_10x.pt",
+    "patch_embeddings_20x.pt",
+    "kmeans_centroids_10x.pt",
+    "kmeans_centroids_20x.pt",
+    "slide_embedding.pt",
+)
+if all((out_dir / name).exists() for name in required):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+acquire_local_handoff_lock() {
+  local lock="${LOCAL_REPO_ROOT}/.auto_handoff.lock"
+  exec 9>"${lock}"
+  if ! flock -n 9; then
+    echo "ERROR: another auto_handoff is already running (lock: ${lock})" >&2
+    echo "  pgrep -af 'auto_handoff_wsi_batch|submit_offline_wsi_batch_remote'" >&2
+    exit 1
+  fi
+  echo "auto_handoff $$ $(date -Iseconds)" >&9
 }

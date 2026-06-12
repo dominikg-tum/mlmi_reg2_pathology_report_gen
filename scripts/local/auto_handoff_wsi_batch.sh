@@ -51,6 +51,8 @@ echo "Cluster SSH: ${CLUSTER_SSH_HOST}"
 echo "Pinned repo: ${PINNED_REPO}"
 echo ""
 
+acquire_local_handoff_lock
+
 mapfile -t _initial < <(list_running_wsi_jobs)
 if ((${#_initial[@]} > 0)) && [[ -n "${_initial[0]// /}" ]]; then
   echo "Detected running job(s):"
@@ -72,11 +74,15 @@ else
   echo "Skipping sync (--no-sync)."
 fi
 
-START=$(remote_first_incomplete_index "${PINNED_REPO}")
-if [[ -z "${START}" ]] || ! [[ "${START}" =~ ^[0-9]+$ ]]; then
+if ! START=$(remote_first_incomplete_index "${PINNED_REPO}"); then
   echo "ERROR: could not determine first incomplete wsi-index" >&2
   exit 1
 fi
+if [[ -z "${START}" ]] || ! [[ "${START}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: invalid wsi-index from head scan: ${START!r}" >&2
+  exit 1
+fi
+echo "First incomplete wsi-index: ${START}" >&2
 
 if ((START > END)); then
   echo "All slides complete through index ${END}. Nothing to submit."

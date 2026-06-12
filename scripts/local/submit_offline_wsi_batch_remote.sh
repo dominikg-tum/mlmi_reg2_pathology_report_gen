@@ -14,6 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=cluster_env.sh
 source "${SCRIPT_DIR}/cluster_env.sh"
+# shellcheck source=handoff_lib.sh
+source "${SCRIPT_DIR}/handoff_lib.sh"
 
 START=0
 END=459
@@ -38,36 +40,6 @@ cluster_batch_running() {
   _cluster_ssh "pgrep -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' >/dev/null 2>&1"
 }
 
-remote_slide_complete() {
-  local idx="$1"
-  _cluster_ssh "python3 - '${PINNED_REPO}' '${idx}'" <<'PY'
-import sys
-from pathlib import Path
-
-repo = Path(sys.argv[1])
-sys.path.insert(0, str(repo))
-from scripts.vision._common import default_cache_root, default_data_dir, load_vision_config
-from vision.cache import slide_cache_dir
-from vision.wsi_io import resolve_wsi_files, slide_id_from_path
-
-vcfg = load_vision_config()
-data_dir = default_data_dir()
-cache_root = default_cache_root(vcfg)
-svs = resolve_wsi_files(data_dir, wsi_index=int(sys.argv[2]))[0]
-out_dir = slide_cache_dir(cache_root, slide_id_from_path(svs))
-required = [
-    "patch_embeddings_10x.pt",
-    "patch_embeddings_20x.pt",
-    "kmeans_centroids_10x.pt",
-    "kmeans_centroids_20x.pt",
-    "slide_embedding.pt",
-]
-missing = [name for name in required if not (out_dir / name).exists()]
-if missing:
-    raise SystemExit(1)
-PY
-}
-
 wait_for_wsi_slot() {
   while true; do
     local wsi_running
@@ -87,6 +59,16 @@ acquire_local_lock() {
       echo "Another local batch may be running. Remove lock on cluster if stale." >&2
       exit 1
     }
+}
+
+acquire_local_batch_lock() {
+  local lock="${LOCAL_REPO_ROOT}/.submit_offline_wsi_batch_remote.lock"
+  exec 8>"${lock}"
+  if ! flock -n 8; then
+    echo "ERROR: another submit_offline_wsi_batch_remote is running (lock: ${lock})" >&2
+    exit 1
+  fi
+  echo "batch_remote $$ $(date -Iseconds)" >&8
 }
 
 release_local_lock() {
@@ -110,6 +92,7 @@ if ((DO_SYNC)); then
   bash "${SCRIPT_DIR}/sync_repo_to_cluster.sh"
 fi
 
+acquire_local_batch_lock
 acquire_local_lock
 
 submitted=0

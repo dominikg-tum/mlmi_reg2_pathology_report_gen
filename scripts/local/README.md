@@ -55,7 +55,10 @@ What it does:
 2. **Immediately kills** `submit_offline_wsi_batch.sh` on head (so slide N+1 is never submitted on shared repo).
 3. **Waits** for the in-flight job to finish (does **not** `scancel` it).
 4. Rsyncs your laptop repo → pinned path.
-5. Starts local batch from the **first incomplete** wsi-index (cache scan on NFS).
+5. Scans NFS cache **once** on head for the first incomplete wsi-index (fast; no 460× `.svs` tree walks).
+6. Starts local batch from that index.
+
+Only **one** auto-handoff / batch-remote process at a time (file lock on laptop).
 
 This works on the Garching SLURM cluster — no special scheduler feature; only SSH + `squeue` polling.
 
