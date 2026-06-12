@@ -98,6 +98,7 @@ acquire_local_lock
 submitted=0
 skipped=0
 for idx in $(seq "${START}" "${END}"); do
+  echo "Checking wsi-index ${idx}..."
   if remote_slide_complete "${idx}"; then
     echo "SKIP wsi-index ${idx} (artifacts complete)"
     skipped=$((skipped + 1))
@@ -109,6 +110,7 @@ for idx in $(seq "${START}" "${END}"); do
     bash "${SCRIPT_DIR}/sync_repo_to_cluster.sh"
   fi
 
+  echo "Submitting wsi-index ${idx}..."
   out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=ALL,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${idx}' scripts/cluster/run_offline_wsi_pinned.sh")
   echo "${out} (wsi-index ${idx}, pinned repo)"
   submitted=$((submitted + 1))
