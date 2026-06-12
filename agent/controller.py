@@ -45,26 +45,30 @@ def traverse(
     skip_report_nodes: bool = False,
     search_all_patches: bool = False,
     retrieval_log: list[dict[str, Any]] | None = None,
+    fixed_visual_bundle: VisualBundle | None = None,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
     store = graph_store or JsonGraphStore(graph)
     mem = case_memory or CaseMemory()
-    retriever_kwargs: dict[str, Any] = {}
-    if retriever_method in ("titan_cosine", "graph_guided"):
-        from vision.encoders.titan import TitanEncoder
+    retriever: PatchRetriever | None = None
+    navigator = None
+    if fixed_visual_bundle is None:
+        retriever_kwargs: dict[str, Any] = {}
+        if retriever_method in ("titan_cosine", "graph_guided"):
+            from vision.encoders.titan import TitanEncoder
 
-        _encoder = TitanEncoder()
-        retriever_kwargs["text_encoder"] = _encoder.encode_text
-        retriever_kwargs["search_all_patches"] = search_all_patches
-    retriever: PatchRetriever | None = get_retriever(retriever_method, **retriever_kwargs)
-    navigator = get_navigator(
-        navigator_method,
-        visual=visual_method,
-        cache_root=cache_root,
-        wsi_path=wsi_path,
-        wsi_data_dir=wsi_data_dir,
-    )
+            _encoder = TitanEncoder()
+            retriever_kwargs["text_encoder"] = _encoder.encode_text
+            retriever_kwargs["search_all_patches"] = search_all_patches
+        retriever = get_retriever(retriever_method, **retriever_kwargs)
+        navigator = get_navigator(
+            navigator_method,
+            visual=visual_method,
+            cache_root=cache_root,
+            wsi_path=wsi_path,
+            wsi_data_dir=wsi_data_dir,
+        )
 
     node = store.get_node(root_id)
     steps: list[Step] = []
@@ -74,13 +78,16 @@ def traverse(
             break
 
         query = build_query(node, steps)
-        visual_bundle: VisualBundle = navigator.select_visual_bundle(
-            node,
-            slide_cache,
-            steps,
-            query=query,
-            retriever=retriever if node.needs_patch_retrieval() else None,
-        )
+        if fixed_visual_bundle is not None:
+            visual_bundle = fixed_visual_bundle
+        else:
+            visual_bundle = navigator.select_visual_bundle(
+                node,
+                slide_cache,
+                steps,
+                query=query,
+                retriever=retriever if node.needs_patch_retrieval() else None,
+            )
         if retrieval_log is not None:
             patches_meta = visual_bundle.metadata.get("retrieved_patches")
             if patches_meta:

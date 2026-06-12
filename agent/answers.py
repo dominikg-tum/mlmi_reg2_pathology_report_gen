@@ -40,10 +40,11 @@ def _answer_text(raw: str) -> str:
 
 def normalize_answer(raw: str, node: Node) -> str | None:
     """Return a graph-compatible answer, or None when a choice cannot be resolved."""
-    text = _answer_text(raw)
     if node.interaction == InteractionType.FREE_TEXT:
-        return text or None
+        free_text = (raw or "").strip()
+        return free_text or None
 
+    text = _answer_text(raw)
     if node.interaction == InteractionType.MULTI_SELECT:
         return text or None
 
@@ -67,4 +68,3 @@ def normalize_answer(raw: str, node: Node) -> str | None:
     if len(mentioned) == 1:
         return mentioned[0]
     return None
-

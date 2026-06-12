@@ -99,3 +99,20 @@ def test_qwen_backend_sends_choices_and_images(tmp_path):
     assert call["extra_body"]["guided_choice"] == node.options
     assert call["messages"][0]["role"] == "system"
     assert isinstance(call["messages"][1]["content"], list)
+
+
+def test_fixed_visual_bundle_bypasses_retrieval(tmp_path):
+    image = tmp_path / "image.png"
+    image.write_bytes(b"image")
+    visual = VisualBundle(
+        thumbnail_path=image,
+        metadata={"visual": "uploaded_image"},
+    )
+
+    steps = traverse(
+        DummyBackend(),
+        retriever_method="graph_guided",
+        fixed_visual_bundle=visual,
+    )
+
+    assert steps[-1].node_id == "report"

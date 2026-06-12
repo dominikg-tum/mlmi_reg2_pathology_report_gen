@@ -1,292 +1,235 @@
-"""Streamlit frontend for graph-guided pathology report generation."""
+"""Streamlit baseline: one image, one VLM, one graph-guided diagnostic chain."""
 
 from __future__ import annotations
 
+import html
 import json
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
+from agent.backends import DummyBackend
 from agent.frontend import (
-    discover_slides,
-    evidence_images,
-    generate_phase2_report,
-    load_retrieval_log,
-    load_saved_report,
-    load_saved_run,
-    resolve_shared_path,
-    run_phase1,
-    slide_label,
+    run_fixed_image_chain,
+    run_remote_image_chain,
+    safe_upload_name,
+    save_baseline_result,
+    save_uploaded_image,
 )
-from baselines.agent_runner import (
-    default_runs_dir,
-    load_paths_config,
-    load_vision_cache_root,
-)
+from baselines.agent_runner import load_paths_config
+
+REPO_ROOT = Path(__file__).resolve().parent
+RUNS_DIR = REPO_ROOT / "runs" / "image_baseline"
+UPLOADS_DIR = RUNS_DIR / "uploads"
 
 
-def _endpoint_online(base_url: str) -> bool:
+def fetch_models(base_url: str) -> list[str]:
+    request = Request(f"{base_url.rstrip('/')}/models")
     try:
-        with urlopen(f"{base_url.rstrip('/')}/models", timeout=1.5) as response:
-            return response.status == 200
-    except (OSError, URLError):
-        return False
+        with urlopen(request, timeout=2.0) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, URLError, json.JSONDecodeError):
+        return []
+    return [
+        str(item["id"])
+        for item in payload.get("data", [])
+        if isinstance(item, dict) and item.get("id")
+    ]
 
 
-def _chain_rows(chain: dict) -> list[dict]:
-    rows = []
-    for index, step in enumerate(chain.get("chain-of-thought") or [], start=1):
-        rows.append(
-            {
-                "Step": index,
-                "Node": step.get("node_id", ""),
-                "Question": step.get("question", ""),
-                "Answer": step.get("answer", ""),
-                "Next question": step.get("next_question", ""),
-            }
-        )
-    return rows
+def chain_without_report(chain: dict) -> list[dict]:
+    steps = chain.get("chain-of-thought") or []
+    return [step for step in steps if step.get("node_id") != "report"]
+
+
+def render_chain(st, chain: dict) -> None:
+    steps = chain_without_report(chain)
+    columns = st.columns(2)
+    for index, step in enumerate(steps):
+        question = html.escape(str(step.get("question", "")))
+        answer = html.escape(str(step.get("answer", "")))
+        node_id = html.escape(str(step.get("node_id", "")))
+        with columns[index % 2]:
+            st.markdown(
+                f"""
+                <div class="qa-card">
+                  <div class="qa-row">
+                    <span class="qa-badge question-badge">Q</span>
+                    <div class="qa-text"><strong>{question}</strong></div>
+                  </div>
+                  <div class="qa-row answer-row">
+                    <span class="qa-badge answer-badge">A</span>
+                    <div class="qa-text">{answer}</div>
+                  </div>
+                  <div class="node-id">{node_id}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def main() -> None:
     import streamlit as st
 
     st.set_page_config(
-        page_title="REG2 Pathology Agent",
+        page_title="REG2 Image Baseline",
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    st.markdown(
+        """
+        <style>
+          .block-container {max-width: 1320px; padding-top: 2rem;}
+          .qa-card {
+            border: 2px solid #173642;
+            border-radius: 8px;
+            padding: 12px 14px 9px 14px;
+            margin-bottom: 14px;
+            background: #ffffff;
+          }
+          .qa-row {display: flex; align-items: flex-start; gap: 10px;}
+          .answer-row {margin-top: 8px; padding-top: 8px; border-top: 1px solid #dfe7ea;}
+          .qa-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 30px; height: 30px; border-radius: 50%;
+            color: white; font-weight: 700; border: 2px solid #173642;
+          }
+          .question-badge {background: #bd1616;}
+          .answer-badge {background: #0876ba;}
+          .qa-text {font-size: 0.98rem; line-height: 1.35; padding-top: 3px;}
+          .node-id {font-size: 0.72rem; color: #667780; margin: 8px 0 0 40px;}
+          .report-box {
+            border: 2px solid #173642; border-radius: 8px;
+            padding: 18px 20px; background: #f7fbfc;
+            font-size: 1.05rem; line-height: 1.55;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     cfg = load_paths_config()
-    qwen_cfg = cfg["qwen"]
-    configured_cache = load_vision_cache_root()
-    cache_root = resolve_shared_path(configured_cache) if configured_cache else None
-    runs_dir = resolve_shared_path(default_runs_dir(cfg))
-    wsi_data_dir = resolve_shared_path(Path(cfg["cluster"]["data_dir"]))
+    default_endpoint = cfg["qwen"]["api_base_url"]
+    default_model = cfg["qwen"]["model_name"]
 
-    st.title("REG2 Pathology Agent")
+    st.title("REG2 Pathology Image Baseline")
     st.caption(
-        "Graph-guided uterine WSI reasoning with per-node visual evidence and VLM answers."
+        "Upload one pathology image. The selected VLM follows the fixed diagnostic "
+        "graph, answers each question, and combines the chain into a final report."
     )
-    run_notice = st.session_state.pop("run_notice", "")
-    report_notice = st.session_state.pop("report_notice", "")
-    if run_notice:
-        st.success(run_notice)
-    if report_notice:
-        st.success(report_notice)
 
     with st.sidebar:
-        st.header("Run configuration")
-        backend = st.selectbox("Answer backend", ["qwen", "dummy"])
-        memory = st.selectbox("Memory", ["flat", "hipporag2", "graphrag", "none"])
-        visual = st.selectbox(
-            "Visual evidence",
-            ["patch_retrieve", "thumbnail", "none"],
+        st.header("VLM connection")
+        mode = st.selectbox("Backend", ["Remote VLM", "Dummy smoke test"])
+        endpoint = st.text_input(
+            "OpenAI-compatible endpoint",
+            value=default_endpoint,
+            disabled=mode != "Remote VLM",
         )
-        retriever_choices = ["graph_guided", "titan_cosine", "none"]
-        retriever_default = 0 if visual == "patch_retrieve" else 2
-        retriever = st.selectbox(
-            "Patch retriever",
-            retriever_choices,
-            index=retriever_default,
-            disabled=visual != "patch_retrieve",
-        )
-        search_all = st.toggle(
-            "Search all patches",
-            value=False,
-            disabled=visual != "patch_retrieve",
-        )
-        st.divider()
-        st.text_input("Qwen endpoint", value=qwen_cfg["api_base_url"], disabled=True)
-        online = _endpoint_online(qwen_cfg["api_base_url"]) if backend == "qwen" else True
-        if online:
-            st.success("Backend available")
+        models = fetch_models(endpoint) if mode == "Remote VLM" else []
+        if models:
+            default_index = models.index(default_model) if default_model in models else 0
+            model_name = st.selectbox("VLM", models, index=default_index)
+            st.success("VLM endpoint available")
         else:
-            st.warning("Qwen server is not responding")
-
-    @st.cache_data(ttl=60, show_spinner=False)
-    def cached_slides(cache: str, runs: str) -> list:
-        return discover_slides(
-            cache_root=Path(cache) if cache else None,
-            runs_dir=Path(runs),
-        )
-
-    slide_options = cached_slides(str(cache_root or ""), str(runs_dir))
-    option_by_id = {option.slide_id: option for option in slide_options}
-
-    select_col, action_col = st.columns([3, 1])
-    with select_col:
-        if slide_options:
-            slide_id = st.selectbox(
-                "Slide",
-                [option.slide_id for option in slide_options],
-                format_func=lambda value: slide_label(option_by_id[value]),
+            model_name = st.text_input(
+                "Model name",
+                value=default_model,
+                disabled=mode != "Remote VLM",
             )
-        else:
-            slide_id = st.text_input("Slide ID", placeholder="TUM_Uterus_0001.svs")
-    with action_col:
-        st.write("")
-        st.write("")
+            if mode == "Remote VLM":
+                st.warning("Endpoint unavailable or no models returned")
+        api_key = st.text_input(
+            "API key",
+            value=cfg["qwen"].get("api_key", "EMPTY"),
+            type="password",
+            disabled=mode != "Remote VLM",
+        )
+
+    input_col, preview_col = st.columns([1, 1])
+    with input_col:
+        st.subheader("Input")
+        uploaded = st.file_uploader(
+            "Pathology image",
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=False,
+        )
         run_clicked = st.button(
-            "Run reasoning chain",
+            "Run diagnostic chain",
             type="primary",
             use_container_width=True,
-            disabled=not slide_id or (backend == "qwen" and not online),
+            disabled=(
+                uploaded is None
+                or (mode == "Remote VLM" and (not endpoint.strip() or not model_name.strip()))
+            ),
         )
-
-    selected = option_by_id.get(slide_id)
-    preview_col, summary_col = st.columns([1, 2])
     with preview_col:
-        st.subheader("Slide overview")
-        if selected and selected.thumbnail_path and selected.thumbnail_path.exists():
-            st.image(
-                str(selected.thumbnail_path),
-                caption=selected.thumbnail_path.name,
-                use_column_width=True,
-            )
+        st.subheader("Image preview")
+        if uploaded is not None:
+            st.image(uploaded, caption=uploaded.name, use_column_width=True)
         else:
-            st.info("No thumbnail is available for this slide.")
+            st.info("Upload a PNG, JPEG, or WebP image.")
 
-    saved_chain = load_saved_run(runs_dir, slide_id) if slide_id else None
-    with summary_col:
-        st.subheader("Agent status")
-        status_top = st.columns(2)
-        status_top[0].metric("Model", "Qwen3-VL 8B" if backend == "qwen" else "Dummy")
-        status_top[1].metric("Visual mode", visual.replace("_", " "))
-        status_bottom = st.columns(2)
-        status_bottom[0].metric(
-            "Cached WSI", "Yes" if selected and selected.has_cache else "No"
-        )
-        status_bottom[1].metric(
-            "Saved chain",
-            f"{len(saved_chain.get('node_path', []))} steps" if saved_chain else "None",
-        )
-        st.write(
-            "The execution graph chooses the next question. The VLM only answers the "
-            "current node using the attached overview and retrieved pathology patches."
-        )
-
-    if run_clicked:
-        effective_retriever = retriever if visual == "patch_retrieve" else "none"
+    if run_clicked and uploaded is not None:
         try:
-            with st.spinner("Walking the diagnostic graph and querying the VLM..."):
-                result, chain_path = run_phase1(
-                    slide_id,
-                    backend=backend,
-                    memory=memory,
-                    visual=visual,
-                    retriever=effective_retriever,
-                    cache_root=cache_root,
-                    runs_dir=runs_dir,
-                    wsi_data_dir=wsi_data_dir,
-                    search_all_patches=search_all,
+            image_path = save_uploaded_image(
+                uploaded.getvalue(),
+                uploaded.name,
+                UPLOADS_DIR,
+            )
+            with st.spinner("Following the diagnostic graph..."):
+                if mode == "Dummy smoke test":
+                    chain = run_fixed_image_chain(
+                        image_path,
+                        backend=DummyBackend(),
+                        image_id=safe_upload_name(uploaded.name),
+                    )
+                else:
+                    chain = run_remote_image_chain(
+                        image_path,
+                        base_url=endpoint,
+                        model_name=model_name,
+                        api_key=api_key,
+                    )
+                output_path = save_baseline_result(
+                    chain,
+                    output_root=RUNS_DIR,
+                    image_name=uploaded.name,
                 )
-            st.session_state["chain"] = result.chain
-            st.session_state["retrieval_log"] = result.retrieval_log
-            st.session_state["chain_path"] = str(chain_path)
-            st.session_state["result_slide_id"] = slide_id
-            st.session_state.pop("report", None)
-            st.session_state["run_notice"] = f"Reasoning chain saved to {chain_path}"
-            st.rerun()
+            st.session_state["baseline_chain"] = chain
+            st.session_state["baseline_image"] = safe_upload_name(uploaded.name)
+            st.session_state["baseline_output"] = str(output_path)
         except Exception as exc:
             st.exception(exc)
 
-    session_matches_slide = st.session_state.get("result_slide_id") == slide_id
-    chain = st.session_state.get("chain") if session_matches_slide else None
-    chain = chain or saved_chain
-    retrieval_log = (
-        st.session_state.get("retrieval_log") if session_matches_slide else None
+    current_image = safe_upload_name(uploaded.name) if uploaded is not None else ""
+    chain = (
+        st.session_state.get("baseline_chain")
+        if st.session_state.get("baseline_image") == current_image
+        else None
     )
-    if retrieval_log is None and slide_id:
-        retrieval_log = load_retrieval_log(runs_dir, slide_id)
-
     if not chain:
-        st.info("Run the agent or select a slide with an existing chain.")
         return
 
-    chain_tab, evidence_tab, report_tab, raw_tab = st.tabs(
-        ["Reasoning chain", "Visual evidence", "Final report", "Raw output"]
+    st.divider()
+    st.subheader("Diagnostic reasoning chain")
+    render_chain(st, chain)
+
+    st.subheader("Final pathology report")
+    report = html.escape(str(chain.get("report", ""))).replace("\n", "<br>")
+    st.markdown(
+        f'<div class="report-box">{report or "No report was generated."}</div>',
+        unsafe_allow_html=True,
     )
+    st.caption(f"Saved to {st.session_state.get('baseline_output', '')}")
 
-    with chain_tab:
-        rows = _chain_rows(chain)
-        st.dataframe(
-            rows,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Step": st.column_config.NumberColumn(width="small"),
-                "Node": st.column_config.TextColumn(width="medium"),
-                "Question": st.column_config.TextColumn(width="large"),
-                "Answer": st.column_config.TextColumn(width="medium"),
-                "Next question": st.column_config.TextColumn(width="large"),
-            },
-        )
-        st.caption("Path: " + " -> ".join(chain.get("node_path") or []))
-
-    with evidence_tab:
-        images = evidence_images(retrieval_log or [])
-        if not images:
-            st.info("No saved patch images are associated with this chain.")
-        else:
-            st.caption(f"{len(images)} retrieved images across the diagnostic path.")
-            for offset in range(0, len(images), 3):
-                columns = st.columns(3)
-                for column, item in zip(columns, images[offset : offset + 3]):
-                    similarity = item.get("similarity")
-                    score = f" | similarity {similarity:.3f}" if isinstance(similarity, float) else ""
-                    column.image(
-                        str(item["path"]),
-                        caption=(
-                            f"{item['node_id']} | {item['zoom_level']} | "
-                            f"{item['scale']}{score}"
-                        ),
-                        use_column_width=True,
-                    )
-
-    with report_tab:
-        report = (
-            st.session_state.get("report") if session_matches_slide else ""
-        ) or load_saved_report(runs_dir, slide_id)
-        if report:
-            st.text_area("Generated pathology report", value=report, height=420)
-        else:
-            st.info("Phase 1 is complete. Generate the report from the answered chain.")
-
-        max_tokens = st.number_input(
-            "Maximum report tokens",
-            min_value=128,
-            max_value=2048,
-            value=1024,
-            step=128,
-        )
-        if st.button("Generate final report", disabled=not chain):
-            configured_model = Path(cfg.get("models", {}).get("medgemma_4b", ""))
-            model_path = str(resolve_shared_path(configured_model))
-            if not model_path:
-                st.error("MedGemma path is not configured.")
-            else:
-                try:
-                    with st.spinner("Generating the CAP-style pathology report..."):
-                        report, report_path = generate_phase2_report(
-                            chain,
-                            slide_id=slide_id,
-                            runs_dir=runs_dir,
-                            model_path=model_path,
-                            max_new_tokens=int(max_tokens),
-                        )
-                    st.session_state["report"] = report
-                    st.session_state["report_notice"] = f"Report saved to {report_path}"
-                    st.rerun()
-                except Exception as exc:
-                    st.exception(exc)
-
-    with raw_tab:
-        st.code(json.dumps(chain, indent=2), language="json")
+    with st.expander("Raw chain JSON"):
+        raw = json.dumps(chain, indent=2)
+        st.code(raw, language="json")
         st.download_button(
-            "Download chain JSON",
-            data=json.dumps(chain, indent=2) + "\n",
-            file_name=f"{slide_id}.cot_chain.json",
+            "Download JSON",
+            data=raw + "\n",
+            file_name=f"{Path(current_image).stem}.cot_chain.json",
             mime="application/json",
         )
 

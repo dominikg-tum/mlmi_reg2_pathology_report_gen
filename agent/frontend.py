@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from agent.backends import AnswerBackend, ZeroShotQwenBackend
+from agent.controller import chain_to_dict, traverse
+from agent.memory import CaseMemory
 from agent.report_writer import MedGemmaReportBackend, write_report
 from baselines.agent_runner import (
     AgentRunResult,
@@ -17,6 +21,7 @@ from baselines.agent_runner import (
     write_phase1_outputs,
 )
 from vision.cache import dataset_thumbnail_dir, slide_id_to_stem
+from vision.backends import VisualBundle
 
 
 @dataclass(frozen=True)
@@ -25,6 +30,79 @@ class SlideOption:
     thumbnail_path: Path | None
     has_cache: bool
     has_existing_chain: bool
+
+
+def safe_upload_name(filename: str) -> str:
+    stem = Path(filename or "uploaded_image.png").stem
+    suffix = Path(filename or "uploaded_image.png").suffix.lower()
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp"):
+        suffix = ".png"
+    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem).strip("._")
+    return f"{safe_stem or 'uploaded_image'}{suffix}"
+
+
+def save_uploaded_image(data: bytes, filename: str, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / safe_upload_name(filename)
+    path.write_bytes(data)
+    return path
+
+
+def run_fixed_image_chain(
+    image_path: Path,
+    *,
+    backend: AnswerBackend,
+    image_id: str | None = None,
+) -> dict[str, Any]:
+    """Run the full graph with one uploaded image attached to every VLM question."""
+    visual = VisualBundle(
+        thumbnail_path=image_path,
+        metadata={"visual": "uploaded_image"},
+    )
+    steps = traverse(
+        backend,
+        case_memory=CaseMemory(),
+        retriever_method="none",
+        visual_method="none",
+        fixed_visual_bundle=visual,
+        skip_report_nodes=False,
+    )
+    return chain_to_dict(
+        steps,
+        slide_id=image_id or image_path.name,
+        include_report=True,
+    )
+
+
+def run_remote_image_chain(
+    image_path: Path,
+    *,
+    base_url: str,
+    model_name: str,
+    api_key: str = "EMPTY",
+) -> dict[str, Any]:
+    import openai
+
+    client = openai.OpenAI(base_url=base_url.rstrip("/"), api_key=api_key)
+    backend = ZeroShotQwenBackend(client, model_name)
+    return run_fixed_image_chain(
+        image_path,
+        backend=backend,
+        image_id=image_path.name,
+    )
+
+
+def save_baseline_result(
+    chain: dict[str, Any],
+    *,
+    output_root: Path,
+    image_name: str,
+) -> Path:
+    run_dir = output_root / Path(image_name).stem
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / "cot_chain.json"
+    path.write_text(json.dumps(chain, indent=2) + "\n")
+    return path
 
 
 def resolve_shared_path(path: Path) -> Path:

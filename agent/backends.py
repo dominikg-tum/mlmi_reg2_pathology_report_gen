@@ -8,7 +8,7 @@ from agent.types import Step
 
 if TYPE_CHECKING:
     import openai
-from graph.schema import InteractionType, Node
+from graph.schema import InteractionType, Node, NodeKind
 from vision.backends import VisualBundle
 from vision.vlm_messages import build_user_content
 
@@ -59,7 +59,14 @@ class ZeroShotQwenBackend:
             prompt_parts.append(
                 "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
             )
-        if node.interaction == InteractionType.FREE_TEXT:
+        if node.node_kind == NodeKind.REPORT:
+            prompt_parts.append(
+                "Combine the visual findings and all prior diagnostic answers into a "
+                "concise final pathology report. State the specimen/procedure when "
+                "supported, followed by the principal diagnosis and key qualifiers. "
+                "Do not mention the reasoning process or answer keys."
+            )
+        elif node.interaction == InteractionType.FREE_TEXT:
             prompt_parts.append("Return a concise pathology answer.")
         else:
             prompt_parts.append("Return exactly one allowed answer key.")

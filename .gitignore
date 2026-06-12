@@ -240,3 +240,5 @@ runs/
 .DS_Store
 ._*
 .___pycache__
+
+local_data/
