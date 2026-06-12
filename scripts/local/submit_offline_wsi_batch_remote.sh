@@ -5,8 +5,7 @@
 # unless you pass --handoff (see scripts/local/README.md).
 #
 # Usage:
-#   bash scripts/local/submit_offline_wsi_batch_remote.sh --start 117 --end 459
-#   bash scripts/local/submit_offline_wsi_batch_remote.sh --start 117 --end 459 --handoff
+#   bash scripts/local/submit_offline_wsi_batch_remote.sh --start 125 --end 459 --handoff
 #   bash scripts/local/auto_handoff_wsi_batch.sh   # recommended: auto-detect + handoff
 
 set -euo pipefail
@@ -56,12 +55,6 @@ wait_for_wsi_slot() {
   done
 }
 
-fetch_incomplete_indices() {
-  local start="$1" end="$2"
-  remote_ensure_wsi_manifest "${PINNED_REPO}"
-  _cluster_ssh "python3 -u '${PINNED_REPO}/scripts/local/remote_cache_check.py' '${PINNED_REPO}' incomplete '${start}' '${end}'"
-}
-
 acquire_local_lock() {
   _cluster_ssh "mkdir -p \"\$(dirname '${REMOTE_LOCK_FILE}')\" && ( set -o noclobber; echo \"\$\$ laptop \$(date -Iseconds)\" > '${REMOTE_LOCK_FILE}' )" \
     || {
@@ -105,25 +98,10 @@ fi
 acquire_local_batch_lock
 acquire_local_lock
 
-echo "Scanning wsi-index ${START}-${END} for incomplete slides (one fast pass on head)..."
-mapfile -t todo < <(fetch_incomplete_indices "${START}" "${END}")
-
-if ((${#todo[@]} == 0)); then
-  echo "All slides complete in range ${START}-${END}."
-  exit 0
-fi
-
-echo "Found ${#todo[@]} incomplete slide(s) to submit."
+echo "Submitting wsi-index ${START}-${END} (sequential; no head-node cache scan)."
 
 submitted=0
-skipped=0
-for idx in "${todo[@]}"; do
-  if remote_slide_complete "${idx}"; then
-    echo "SKIP wsi-index ${idx} (artifacts complete since scan)"
-    skipped=$((skipped + 1))
-    continue
-  fi
-
+for idx in $(seq "${START}" "${END}"); do
   wait_for_wsi_slot
   if ((DO_SYNC)); then
     bash "${SCRIPT_DIR}/sync_repo_to_cluster.sh"
@@ -135,4 +113,4 @@ for idx in "${todo[@]}"; do
   submitted=$((submitted + 1))
 done
 
-echo "Done: submitted ${submitted}, skipped ${skipped} since scan (wsi-index ${START}-${END}, pinned repo)."
+echo "Done: submitted ${submitted} job(s) (wsi-index ${START}-${END}, pinned repo)."

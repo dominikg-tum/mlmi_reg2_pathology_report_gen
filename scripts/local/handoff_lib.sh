@@ -49,30 +49,13 @@ wait_for_wsi_jobs_drain() {
   done
 }
 
-remote_ensure_wsi_manifest() {
-  local repo="${1:-${PINNED_REPO}}"
-  echo "Ensuring wsi index manifest on head (thumbnail bank or one-time find)..." >&2
-  _cluster_ssh "python3 -u '${repo}/scripts/local/remote_cache_check.py' '${repo}' ensure-manifest -" >&2
-}
-
-# First wsi-index without full offline artifacts (uses cached manifest on head).
-remote_first_incomplete_index() {
-  local repo="${1:-${PINNED_REPO}}"
-  local out
-  remote_ensure_wsi_manifest "${repo}"
-  echo "Scanning cache for first incomplete wsi-index..." >&2
-  if ! out=$(_cluster_ssh "python3 -u '${repo}/scripts/local/remote_cache_check.py' '${repo}' first -"); then
-    echo "ERROR: remote_first_incomplete_index failed on head" >&2
-    return 1
-  fi
-  echo "${out}" | tail -1 | tr -d '[:space:]'
-}
-
-# True if slide at wsi-index has all required cache artifacts.
-remote_slide_complete() {
-  local idx="$1"
-  local repo="${2:-${PINNED_REPO}}"
-  _cluster_ssh "python3 -u '${repo}/scripts/local/remote_cache_check.py' '${repo}' check '${idx}'"
+# Resume index = number of slide_embedding.pt under cache (fast find; ~seconds on NFS).
+# Assumes slides were processed in wsi-index order (0, 1, 2, …).
+remote_fast_resume_index() {
+  local n
+  echo "Resume index from slide_embedding.pt count in ${REMOTE_CACHE_DIR}..." >&2
+  n=$(_cluster_ssh "find '${REMOTE_CACHE_DIR}' -maxdepth 2 -name slide_embedding.pt 2>/dev/null | wc -l")
+  echo "${n// /}"
 }
 
 acquire_local_handoff_lock() {

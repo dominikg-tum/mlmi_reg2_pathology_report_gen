@@ -12,6 +12,7 @@
 #   nohup bash scripts/local/auto_handoff_wsi_batch.sh >> ~/wsi_handoff.log 2>&1 &
 #
 # Options:
+#   --start N        Override resume index (default: count of slide_embedding.pt in cache)
 #   --end N          Last wsi-index (default 459)
 #   --no-sync        Skip initial rsync (not recommended)
 
@@ -25,20 +26,22 @@ source "${SCRIPT_DIR}/handoff_lib.sh"
 
 END=459
 DO_SYNC=1
+START=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --start) START="$2"; shift 2 ;;
     --end) END="$2"; shift 2 ;;
     --no-sync) DO_SYNC=0; shift ;;
     -h | --help)
       cat <<'EOF'
-Usage: auto_handoff_wsi_batch.sh [--end N] [--no-sync]
+Usage: auto_handoff_wsi_batch.sh [--start N] [--end N] [--no-sync]
 
 Watches the cluster, stops the shared-repo batch submitter, waits for the
 current wsi-offline job to exit, then runs submit_offline_wsi_batch_remote.sh
 from your laptop (pinned code on NFS).
 
-Safe to start while a job is running. Does not scancel the in-flight job.
+Resume index defaults to slide_embedding.pt count in cache (fast; no manifest).
 EOF
       exit 0
       ;;
@@ -74,15 +77,17 @@ else
   echo "Skipping sync (--no-sync)."
 fi
 
-if ! START=$(remote_first_incomplete_index "${PINNED_REPO}"); then
-  echo "ERROR: could not determine first incomplete wsi-index" >&2
-  exit 1
+if [[ -z "${START}" ]]; then
+  if ! START=$(remote_fast_resume_index); then
+    echo "ERROR: could not determine resume wsi-index" >&2
+    exit 1
+  fi
 fi
 if [[ -z "${START}" ]] || ! [[ "${START}" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: invalid wsi-index from head scan: '${START}'" >&2
+  echo "ERROR: invalid wsi-index: '${START}'" >&2
   exit 1
 fi
-echo "First incomplete wsi-index: ${START}" >&2
+echo "Resume wsi-index: ${START}" >&2
 
 if ((START > END)); then
   echo "All slides complete through index ${END}. Nothing to submit."
