@@ -10,6 +10,8 @@
 
 set -euo pipefail
 
+trap 'echo "FATAL: ${BASH_SOURCE[0]}:${LINENO}: ${BASH_COMMAND}" >&2' ERR
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=cluster_env.sh
 source "${SCRIPT_DIR}/cluster_env.sh"
@@ -39,14 +41,32 @@ cluster_batch_running() {
   _cluster_ssh "pgrep -f '${CLUSTER_BATCH_SUBMITTER_PGREP}' >/dev/null 2>&1"
 }
 
+# Count running SLURM jobs for current user on cluster (stdout: integer).
+remote_user_job_count() {
+  local n
+  n=$(_cluster_ssh 'squeue -u "$(whoami)" -h 2>/dev/null | wc -l')
+  echo "${n// /}"
+}
+
+remote_wsi_job_count() {
+  local n
+  n=$(_cluster_ssh 'squeue -u "$(whoami)" -n wsi-offline-pipeline -h 2>/dev/null | wc -l')
+  echo "${n// /}"
+}
+
 wait_for_wsi_slot() {
+  local total wsi_running
   while true; do
-    local total wsi_running
-    read -r total wsi_running < <(
-      _cluster_ssh 't=$(squeue -u "$(whoami)" -h 2>/dev/null | wc -l); w=$(squeue -u "$(whoami)" -n wsi-offline-pipeline -h 2>/dev/null | wc -l); printf "%s %s" "$t" "$w"'
-    )
-    total=${total// /}
-    wsi_running=${wsi_running// /}
+    if ! total=$(remote_user_job_count); then
+      echo "WARNING: squeue (total jobs) failed; retry in ${POLL_SEC}s..." >&2
+      sleep "${POLL_SEC}"
+      continue
+    fi
+    if ! wsi_running=$(remote_wsi_job_count); then
+      echo "WARNING: squeue (wsi-offline) failed; retry in ${POLL_SEC}s..." >&2
+      sleep "${POLL_SEC}"
+      continue
+    fi
     if ((total < MAX_USER_JOBS && wsi_running < MAX_WSI_JOBS)); then
       return 0
     fi
@@ -108,7 +128,10 @@ for idx in $(seq "${START}" "${END}"); do
   fi
 
   echo "Submitting wsi-index ${idx}..."
-  out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=ALL,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${idx}' scripts/cluster/run_offline_wsi_pinned.sh")
+  if ! out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=ALL,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${idx}' scripts/cluster/run_offline_wsi_pinned.sh"); then
+    echo "ERROR: sbatch failed for wsi-index ${idx}" >&2
+    exit 1
+  fi
   echo "${out} (wsi-index ${idx}, pinned repo)"
   submitted=$((submitted + 1))
 done
