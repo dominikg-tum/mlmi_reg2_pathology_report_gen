@@ -43,7 +43,7 @@ wait_for_wsi_slot() {
   while true; do
     local total wsi_running
     read -r total wsi_running < <(
-      _cluster_ssh "printf '%s %s' \"\$(squeue -u \\\"\\\$(whoami)\\\" -h 2>/dev/null | wc -l)\" \"\$(squeue -u \\\"\\\$(whoami)\\\" -n wsi-offline-pipeline -h 2>/dev/null | wc -l)\""
+      _cluster_ssh 't=$(squeue -u "$(whoami)" -h 2>/dev/null | wc -l); w=$(squeue -u "$(whoami)" -n wsi-offline-pipeline -h 2>/dev/null | wc -l); printf "%s %s" "$t" "$w"'
     )
     total=${total// /}
     wsi_running=${wsi_running// /}
