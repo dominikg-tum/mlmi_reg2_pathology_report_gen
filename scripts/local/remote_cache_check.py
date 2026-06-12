@@ -2,13 +2,15 @@
 """Run on cluster via SSH (file on pinned repo — no stdin piping over SSH).
 
 Usage:
-  python3 scripts/local/remote_cache_check.py REPO check INDEX       # exit 0 if complete
-  python3 scripts/local/remote_cache_check.py REPO first -           # print first incomplete index
-  python3 scripts/local/remote_cache_check.py REPO incomplete S E  # print incomplete indices in [S,E]
+  python3 scripts/local/remote_cache_check.py REPO check INDEX           # exit 0 if complete
+  python3 scripts/local/remote_cache_check.py REPO first -               # print first incomplete index
+  python3 scripts/local/remote_cache_check.py REPO incomplete START END  # print incomplete indices in [S,E]
+  python3 scripts/local/remote_cache_check.py REPO ensure-manifest -     # build/load manifest only
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,27 +36,69 @@ def _load_repo(repo: Path):
     return vcfg, cache_root, slide_cache_dir, find_svs_files, slide_id_from_path
 
 
-def _load_slide_ids(repo: Path) -> list[str]:
-    """Sorted slide_id strings (e.g. TUM_Uterus_0001.svs) for wsi-index mapping."""
-    from scripts.vision._common import default_data_dir
+def _write_manifest(manifest: Path, ids: list[str]) -> None:
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("\n".join(ids) + "\n")
 
-    _, cache_root, _, find_svs_files, slide_id_from_path = _load_repo(repo)
+
+def _slide_ids_from_thumbnails(vcfg: dict) -> list[str] | None:
+    from vision.cache import dataset_thumbnail_dir
+
+    bank = dataset_thumbnail_dir(vcfg)
+    if bank is None or not bank.is_dir():
+        return None
+    stems = sorted(path.stem for path in bank.glob("*.jpg"))
+    if not stems:
+        return None
+    return [f"{stem}.svs" for stem in stems]
+
+
+def _slide_ids_from_find(data_dir: Path, find_svs_files, slide_id_from_path) -> list[str]:
+    print(f"Scanning {data_dir} for .svs via find(1) (one-time)...", file=sys.stderr, flush=True)
+    proc = subprocess.run(
+        ["find", str(data_dir), "-name", "*.svs", "-type", "f"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        print("find failed; falling back to Python rglob...", file=sys.stderr, flush=True)
+        return [slide_id_from_path(path) for path in find_svs_files(data_dir)]
+    paths = sorted(Path(line.strip()) for line in proc.stdout.splitlines() if line.strip())
+    print(f"Found {len(paths)} .svs files.", file=sys.stderr, flush=True)
+    return [slide_id_from_path(path) for path in paths]
+
+
+def _load_slide_ids(repo: Path) -> list[str]:
+    vcfg, cache_root, _, find_svs_files, slide_id_from_path = _load_repo(repo)
     manifest = cache_root / MANIFEST_NAME
     if manifest.is_file():
         ids = [line.strip() for line in manifest.read_text().splitlines() if line.strip()]
         if ids:
             return ids
 
-    data_dir = default_data_dir()
-    print(
-        f"Building wsi index manifest from sorted .svs under {data_dir} (one-time; may take a few minutes on NFS)...",
-        file=sys.stderr,
-    )
-    ids = [slide_id_from_path(path) for path in find_svs_files(data_dir)]
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text("\n".join(ids) + "\n")
-    print(f"Wrote {len(ids)} slide ids to {manifest}", file=sys.stderr)
+    ids = _slide_ids_from_thumbnails(vcfg)
+    if ids:
+        print(
+            f"Built wsi index manifest from flat thumbnail bank ({len(ids)} slides).",
+            file=sys.stderr,
+            flush=True,
+        )
+        _write_manifest(manifest, ids)
+        return ids
+
+    from scripts.vision._common import default_data_dir
+
+    ids = _slide_ids_from_find(default_data_dir(), find_svs_files, slide_id_from_path)
+    _write_manifest(manifest, ids)
+    print(f"Wrote {len(ids)} slide ids to {manifest}", file=sys.stderr, flush=True)
     return ids
+
+
+def ensure_manifest(repo: Path) -> int:
+    ids = _load_slide_ids(repo)
+    print(len(ids))
+    return len(ids)
 
 
 def _artifacts_complete(cache_root: Path, slide_cache_dir, slide_id: str) -> bool:
@@ -121,6 +165,13 @@ def main() -> None:
         end = int(sys.argv[4])
         for idx in incomplete_in_range(repo, start, end):
             print(idx)
+        raise SystemExit(0)
+
+    if mode == "ensure-manifest":
+        if len(sys.argv) != 4 or sys.argv[3] != "-":
+            print("ensure-manifest mode: python3 ... REPO ensure-manifest -", file=sys.stderr)
+            raise SystemExit(2)
+        ensure_manifest(repo)
         raise SystemExit(0)
 
     print(f"unknown mode: {mode}", file=sys.stderr)

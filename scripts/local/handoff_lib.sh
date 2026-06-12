@@ -1,13 +1,16 @@
 # Shared helpers for cluster → pinned-repo handoff (sourced, not executed).
 
+# pgrep pattern: [s]… avoids matching the pgrep process itself (classic footgun).
+CLUSTER_BATCH_SUBMITTER_PGREP='[s]cripts/cluster/submit_offline_wsi_batch.sh'
+
 stop_cluster_batch_submitter() {
-  if _cluster_ssh "pgrep -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' >/dev/null 2>&1"; then
+  if _cluster_ssh "pgrep -f '${CLUSTER_BATCH_SUBMITTER_PGREP}' >/dev/null 2>&1"; then
     echo "Stopping cluster submit_offline_wsi_batch.sh (prevents next slide on shared repo)..."
-    _cluster_ssh "pkill -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' || true" || true
+    _cluster_ssh "pkill -f '${CLUSTER_BATCH_SUBMITTER_PGREP}' || true" || true
     sleep 2
-    if _cluster_ssh "pgrep -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' >/dev/null 2>&1"; then
+    if _cluster_ssh "pgrep -f '${CLUSTER_BATCH_SUBMITTER_PGREP}' >/dev/null 2>&1"; then
       echo "WARNING: cluster batch submitter still running; retrying pkill -9" >&2
-      _cluster_ssh "pkill -9 -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' || true" || true
+      _cluster_ssh "pkill -9 -f '${CLUSTER_BATCH_SUBMITTER_PGREP}' || true" || true
       sleep 1
     fi
   else
@@ -46,24 +49,30 @@ wait_for_wsi_jobs_drain() {
   done
 }
 
-# First wsi-index without full offline artifacts (single .svs listing on head).
+remote_ensure_wsi_manifest() {
+  local repo="${1:-${PINNED_REPO}}"
+  echo "Ensuring wsi index manifest on head (thumbnail bank or one-time find)..." >&2
+  _cluster_ssh "python3 -u '${repo}/scripts/local/remote_cache_check.py' '${repo}' ensure-manifest -" >&2
+}
+
+# First wsi-index without full offline artifacts (uses cached manifest on head).
 remote_first_incomplete_index() {
   local repo="${1:-${PINNED_REPO}}"
   local out
-  echo "Scanning cache for first incomplete wsi-index (one .svs listing on head)..." >&2
-  if ! out=$(_cluster_ssh "python3 '${repo}/scripts/local/remote_cache_check.py' '${repo}' first -" 2>&1); then
-    echo "ERROR: remote_first_incomplete_index failed on head:" >&2
-    echo "${out}" >&2
+  remote_ensure_wsi_manifest "${repo}"
+  echo "Scanning cache for first incomplete wsi-index..." >&2
+  if ! out=$(_cluster_ssh "python3 -u '${repo}/scripts/local/remote_cache_check.py' '${repo}' first -"); then
+    echo "ERROR: remote_first_incomplete_index failed on head" >&2
     return 1
   fi
   echo "${out}" | tail -1 | tr -d '[:space:]'
 }
 
-# True if slide at wsi-index has all required cache artifacts (one .svs listing per call).
+# True if slide at wsi-index has all required cache artifacts.
 remote_slide_complete() {
   local idx="$1"
   local repo="${2:-${PINNED_REPO}}"
-  _cluster_ssh "python3 '${repo}/scripts/local/remote_cache_check.py' '${repo}' check '${idx}'"
+  _cluster_ssh "python3 -u '${repo}/scripts/local/remote_cache_check.py' '${repo}' check '${idx}'"
 }
 
 acquire_local_handoff_lock() {

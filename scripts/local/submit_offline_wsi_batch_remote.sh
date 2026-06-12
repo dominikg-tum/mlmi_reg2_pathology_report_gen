@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 cluster_batch_running() {
-  _cluster_ssh "pgrep -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' >/dev/null 2>&1"
+  _cluster_ssh "pgrep -f '${CLUSTER_BATCH_SUBMITTER_PGREP}' >/dev/null 2>&1"
 }
 
 wait_for_wsi_slot() {
@@ -58,7 +58,8 @@ wait_for_wsi_slot() {
 
 fetch_incomplete_indices() {
   local start="$1" end="$2"
-  _cluster_ssh "python3 '${PINNED_REPO}/scripts/local/remote_cache_check.py' '${PINNED_REPO}' incomplete '${start}' '${end}'"
+  remote_ensure_wsi_manifest "${PINNED_REPO}"
+  _cluster_ssh "python3 -u '${PINNED_REPO}/scripts/local/remote_cache_check.py' '${PINNED_REPO}' incomplete '${start}' '${end}'"
 }
 
 acquire_local_lock() {
