@@ -79,7 +79,7 @@ if ! START=$(remote_first_incomplete_index "${PINNED_REPO}"); then
   exit 1
 fi
 if [[ -z "${START}" ]] || ! [[ "${START}" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: invalid wsi-index from head scan: ${START!r}" >&2
+  echo "ERROR: invalid wsi-index from head scan: '${START}'" >&2
   exit 1
 fi
 echo "First incomplete wsi-index: ${START}" >&2
