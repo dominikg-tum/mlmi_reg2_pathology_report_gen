@@ -42,14 +42,23 @@ cluster_batch_running() {
 
 wait_for_wsi_slot() {
   while true; do
-    local wsi_running
-    wsi_running=$(_cluster_ssh "squeue -u \"\$(whoami)\" -n wsi-offline-pipeline -h 2>/dev/null | wc -l")
-    if ((wsi_running < MAX_WSI_JOBS)); then
+    local total wsi_running
+    read -r total wsi_running < <(
+      _cluster_ssh "printf '%s %s' \"\$(squeue -u \\\"\\\$(whoami)\\\" -h 2>/dev/null | wc -l)\" \"\$(squeue -u \\\"\\\$(whoami)\\\" -n wsi-offline-pipeline -h 2>/dev/null | wc -l)\""
+    )
+    total=${total// /}
+    wsi_running=${wsi_running// /}
+    if ((total < MAX_USER_JOBS && wsi_running < MAX_WSI_JOBS)); then
       return 0
     fi
-    echo "Waiting for wsi-offline slot (${wsi_running}/${MAX_WSI_JOBS})..."
+    echo "Waiting for job slot (total ${total}/${MAX_USER_JOBS}, wsi-offline ${wsi_running}/${MAX_WSI_JOBS})..."
     sleep "${POLL_SEC}"
   done
+}
+
+fetch_incomplete_indices() {
+  local start="$1" end="$2"
+  _cluster_ssh "python3 '${PINNED_REPO}/scripts/local/remote_cache_check.py' '${PINNED_REPO}' incomplete '${start}' '${end}'"
 }
 
 acquire_local_lock() {
@@ -95,12 +104,21 @@ fi
 acquire_local_batch_lock
 acquire_local_lock
 
+echo "Scanning wsi-index ${START}-${END} for incomplete slides (one fast pass on head)..."
+mapfile -t todo < <(fetch_incomplete_indices "${START}" "${END}")
+
+if ((${#todo[@]} == 0)); then
+  echo "All slides complete in range ${START}-${END}."
+  exit 0
+fi
+
+echo "Found ${#todo[@]} incomplete slide(s) to submit."
+
 submitted=0
 skipped=0
-for idx in $(seq "${START}" "${END}"); do
-  echo "Checking wsi-index ${idx}..."
+for idx in "${todo[@]}"; do
   if remote_slide_complete "${idx}"; then
-    echo "SKIP wsi-index ${idx} (artifacts complete)"
+    echo "SKIP wsi-index ${idx} (artifacts complete since scan)"
     skipped=$((skipped + 1))
     continue
   fi
@@ -116,4 +134,4 @@ for idx in $(seq "${START}" "${END}"); do
   submitted=$((submitted + 1))
 done
 
-echo "Done: submitted ${submitted}, skipped ${skipped} (wsi-index ${START}-${END}, pinned repo)."
+echo "Done: submitted ${submitted}, skipped ${skipped} since scan (wsi-index ${START}-${END}, pinned repo)."
