@@ -13,7 +13,16 @@ MAX_WSI_JOBS="${MAX_WSI_JOBS:-2}"
 POLL_SEC="${POLL_SEC:-30}"
 
 _cluster_ssh() {
-  ssh -o BatchMode=yes -o ForwardX11=no "${CLUSTER_SSH_HOST}" "$@"
+  local attempt rc=255
+  for attempt in 1 2 3; do
+    if ssh -o BatchMode=yes -o ForwardX11=no -o ConnectTimeout=30 \
+      "${CLUSTER_SSH_HOST}" "$@"; then
+      return 0
+    fi
+    rc=$?
+    [[ "${attempt}" -lt 3 ]] && sleep 3
+  done
+  return "${rc}"
 }
 
 # Parse wsi-index from squeue %i field (e.g. 10709_120 → 120).

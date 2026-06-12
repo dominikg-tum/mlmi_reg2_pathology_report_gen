@@ -3,11 +3,11 @@
 stop_cluster_batch_submitter() {
   if _cluster_ssh "pgrep -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' >/dev/null 2>&1"; then
     echo "Stopping cluster submit_offline_wsi_batch.sh (prevents next slide on shared repo)..."
-    _cluster_ssh "pkill -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' || true"
+    _cluster_ssh "pkill -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' || true" || true
     sleep 2
     if _cluster_ssh "pgrep -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' >/dev/null 2>&1"; then
       echo "WARNING: cluster batch submitter still running; retrying pkill -9" >&2
-      _cluster_ssh "pkill -9 -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' || true"
+      _cluster_ssh "pkill -9 -f 'bash scripts/cluster/submit_offline_wsi_batch.sh' || true" || true
       sleep 1
     fi
   else
