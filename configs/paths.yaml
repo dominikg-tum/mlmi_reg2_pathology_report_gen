@@ -44,3 +44,6 @@ qwen:
 extraction:
   # Repo script output (team root script writes report_parts_extracted.json at project_root)
   report_parts_json: /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/data/report_parts_extracted.json
+
+rag:
+  chroma_db_storage: /mnt/projects/mlmi/reg2/chroma_db_storage

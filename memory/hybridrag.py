@@ -1,7 +1,9 @@
 """
 HybridRAG semantic memory
-- RAG for getting familiar and testing purposes
-- Semantical vector search and "BM25" (https://en.wikipedia.org/wiki/Okapi_BM25)
+
+Baseline RAG system for pipeline tests and ablation study.
+Combines semantic vector search (ChromaDB + PubMedBERT) with
+lexical keyword search (BM25).
 """
 
 from __future__ import annotations
@@ -10,7 +12,9 @@ import gc
 import os
 import re
 import shutil
-import time
+from pathlib import Path
+from typing import Any
+import yaml
 
 from graph.schema import Node, RetrievalLevel
 import pandas as pd
@@ -23,14 +27,26 @@ from langchain_classic.retrievers import EnsembleRetriever
 
 from memory.base import SemanticMemory
 
-# Storage file for Semantic Embeddings (needs to get generalized)
-CHROMA_STORAGE_DEFAULT  = "./chroma_db_storage"
+# Path to repository root directory
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class HybridRAGMemory(SemanticMemory):
+    """
+    HybridRAG memory component
 
-    def __init__(self, chroma_storage: str = CHROMA_STORAGE_DEFAULT):
-        self.chroma_storage = chroma_storage
+    Combines semantic vector search (ChromaDB + PubMedBERT) with
+    lexical keyword search (BM25). Vector search captures general conceptual meaning
+    of a pathology report. BM25 ensures that highly specific biomarkers
+    and abbreviations (e.g., "P40", "WT1") are not missed due to vector dilution.
+    """
+
+    def __init__(self):
+        """
+        Initializes the HybridRAGMemory, setting up storage paths and the
+        domain-specific embedding model.
+        """
+        self.chroma_storage = get_chroma_storage_default()
         self.vector_storage = None
         self.bm25_retriever = None
         self.ensemble_retriever = None
@@ -41,7 +57,26 @@ class HybridRAGMemory(SemanticMemory):
         self.embeddings = HuggingFaceEmbeddings(model_name="NeuML/pubmedbert-base-embeddings")
 
     def build_index(self, train_reports_path: str, *, split: str = "train", force_rebuild: bool = False) -> None:
-        # Read reports file with pandas
+        """
+        Builds or loads the ensemble index containing both Vector and BM25 databases.
+
+        Reads the pathology reports, filters them by dataset split and converts
+        them into Document objects. Chroma vector database is
+        saved to disk and reloaded if it already exists, unless force_rebuild is True.
+
+        Args:
+            train_reports_path (str): Path to the Excel file containing the reports.
+            split (str): Which dataset split to index (default: "train").
+            force_rebuild (bool): If True, deletes any existing Chroma database
+                                  on disk and rebuilds embeddings.
+
+        Raises:
+            FileNotFoundError: If the specified Excel file does not exist.
+        """
+
+        # Read reports file with pandas#
+        # Correct file path management is redundant at this point
+        # because of switch to CoT chains in future
         try:
             df = pd.read_excel(train_reports_path)
         except FileNotFoundError as exception:
@@ -50,7 +85,8 @@ class HybridRAGMemory(SemanticMemory):
             ) from exception
 
         # Optional: Only use reports with case_class A and B as others are not complete
-        df = df[df["case_class"].isin(['A', 'B'])]
+        # 28 of 220 cases are in class A and B so it doesn't really make sense to remove C-E
+        # df = df[df["case_class"].isin(['A', 'B'])]
         # Remove empty reports if exist
         df = df.dropna(subset=['english_reports'])
 
@@ -107,10 +143,29 @@ class HybridRAGMemory(SemanticMemory):
         # Could also do ablation study on weights
         self.ensemble_retriever = EnsembleRetriever(
             retrievers=[self.vector_retriever, self.bm25_retriever],
-            weights=[0.6, 0.4]
+            weights=[0.65, 0.35]
         )
 
     def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
+        """
+        Retrieves most relevant context from the index based on query and node.
+
+        Adjusts number of returned documents (k) based on retrieval depth.
+        Enriches the base query with context from the graph.
+
+        Args:
+            node (Node): Current node in the diagnostic graph.
+            query (str): Raw search string.
+            k (int): Base number of documents to retrieve.
+
+        Returns:
+            str: A formatted string concatenating the top-k retrieved documents,
+                 including their source IDs and node metadata.
+
+        Raises:
+            RuntimeError: If called before `build_index()` is executed.
+        """
+
         if self.ensemble_retriever is None:
             raise RuntimeError("RAG: build_index() must be called before retrieve()")
 
@@ -142,4 +197,27 @@ class HybridRAGMemory(SemanticMemory):
 
 
 def clean_tokenize(text: str) -> list[str]:
+    """
+    Custom tokenizer for BM25 lexical search.
+    Strips punctuation and converts text to lowercase.
+
+    Args:
+        text (str): The raw text string to tokenize.
+
+    Returns:
+        list[str]: A list of cleaned, lowercase word tokens.
+    """
     return re.findall(r'\w+', text.lower())
+
+
+def load_config() -> dict[str, Any]:
+    """Loads the main path configuration YAML file."""
+    path = REPO_ROOT / "configs" / "paths.yaml"
+    with path.open() as f:
+        return yaml.safe_load(f)
+
+
+def get_chroma_storage_default():
+    """Retrieves the default path for Chroma database from the config."""
+    cfg = load_config()
+    return Path(cfg["rag"]["chroma_db_storage"])
