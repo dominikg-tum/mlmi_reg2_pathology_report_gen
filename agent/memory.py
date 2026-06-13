@@ -34,6 +34,11 @@ class CaseMemory:
 
     def append(self, node_id: str, question: str, answer: str) -> None:
         self.episodic.append(node_id, question, answer)
+        if self.semantic is not None and hasattr(self.semantic, "online_update"):
+            try:
+                self.semantic.online_update(node_id, question, answer)
+            except Exception:
+                pass
 
     def episodic_context(self) -> str:
         return self.episodic.episodic_context()

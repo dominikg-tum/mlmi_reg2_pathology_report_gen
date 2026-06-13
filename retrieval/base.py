@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vision.cache import SlideCache
+
+if TYPE_CHECKING:
+    from retrieval.titan_cosine import RetrievedPatch
 
 
 class PatchRetriever(Protocol):
@@ -13,10 +16,10 @@ class PatchRetriever(Protocol):
         query: str,
         slide_cache: SlideCache,
         *,
-        level: str = "high",
+        level: str = "20x",
         k: int = 3,
         exclude: set[int] | None = None,
-    ) -> tuple[Any, list[int]]: ...
+    ) -> list["RetrievedPatch"]: ...
 
 
 def get_retriever(method: str, **kwargs) -> PatchRetriever | None:
@@ -25,7 +28,10 @@ def get_retriever(method: str, **kwargs) -> PatchRetriever | None:
     if method == "titan_cosine":
         from retrieval.titan_cosine import TitanCosineRetriever
 
-        return TitanCosineRetriever(text_encoder=kwargs.get("text_encoder"))
+        return TitanCosineRetriever(
+            text_encoder=kwargs.get("text_encoder"),
+            search_all_patches=bool(kwargs.get("search_all_patches", False)),
+        )
     if method == "graph_guided":
         from retrieval.graph_guided import GraphGuidedRetriever
 

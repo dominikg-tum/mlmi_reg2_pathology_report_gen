@@ -1,21 +1,49 @@
 # Vision (DOMI)
 
-## P1 — thumbnail (no TITAN)
+Patch tiling uses **512×512 px** at ×4 / ×10 / ×20 (`configs/vision.yaml`). CONCHv1.5 via `TitanEncoder.return_conch()` only.
 
-```bash
-python scripts/vision/build_thumbnail_cache.py
-python -m baselines.run_agent --visual thumbnail
+## P2 — patch retrieval pipeline
+
+| Step | Script | Output |
+|------|--------|--------|
+| Tile | `scripts/vision/tile_slides.py` | `coords_{medium,high}.pt`, `meta_*.json` |
+| Verify | `scripts/vision/verify_tiling.py` | `tiling_preview_high.png`, `tiling_verified.flag` |
+| Encode | `scripts/vision/encode_patches_offline.py` | `embeddings_{medium,high}.pt` |
+| K-means | `scripts/vision/build_kmeans_index.py` | `kmeans_centroids_{medium,high}.pt` |
+| Demo | `scripts/vision/run_retrieval_demo.py` | `demo_<stem>.png` |
+
+Per slide cache layout:
+
+```text
+{cache_root}/{slide_id}/
+  coords_medium.pt
+  coords_high.pt
+  embeddings_medium.pt
+  embeddings_high.pt
+  kmeans_centroids_medium.pt
+  kmeans_centroids_high.pt
+  meta_medium.json
+  meta_high.json
+  tiling_preview_high.png
 ```
 
-## P2 — offline encode then retrieve
+## P1 baselines (unchanged)
 
-```bash
-python scripts/vision/encode_patches_offline.py   # sbatch on cluster
-python -m baselines.run_agent --visual patch_retrieve --retriever titan_cosine
-```
+| Baseline | `--visual` | Offline job |
+|----------|------------|-------------|
+| Thumbnail | `thumbnail` | `build_thumbnail_cache.py` |
+| TITAN slide embed | `slide_embed` | `encode_slide_embeddings.py` |
 
-Cache layout: `configs/vision.yaml` → `cache_root` (cluster default: `dominik/cache` via `paths.yaml`) → `{slide_id}/thumbnail.png`, `embeddings_high.pt`, etc.
+### Team thumbnail banks (`/mnt/projects/mlmi/reg2/dataset/`)
 
-## MMNavAgent
+Precomputed JPEGs (460 slides) — use while full CONCH/TITAN offline encode is in flight:
 
-Future: `vision/navigation.py` → `get_navigator("mnavagent")` when code is public.
+| Directory | Use |
+|-----------|-----|
+| `thumbnails/` | Default pyramid downsample |
+| `thumbnails_kmeans/` | Tissue-emphasized (k≈100) — recommended over plain thumbnails |
+| `thumbnails_kmeans_5/` | Coarse tissue summary (k=5) — ablation |
+
+Select bank via `configs/vision.yaml` → `thumbnail.variant`. See [PROJECT_OVERVIEW.md §2a](../docs/PROJECT_OVERVIEW.md#2a-thumbnail-options-cluster).
+
+Data WSIs: `/mnt/projects/mlmi/reg2/TUMUntera` (see `configs/paths.yaml`).

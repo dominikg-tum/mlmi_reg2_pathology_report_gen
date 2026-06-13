@@ -33,10 +33,23 @@ class VisualPolicy(str, Enum):
     BOTH = "both"
 
 
-class RetrievalLevel(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
+class ZoomLevel(str, Enum):
+    """Objective magnification for Phase 1 patch pool selection."""
+
+    X5 = "5x"
+    X10 = "10x"
+    X20 = "20x"
+    X40 = "40x"
+
+
+# Legacy graph JSON may still use retrieval_level band keys or 4x zoom.
+_RETRIEVAL_LEVEL_TO_ZOOM = {
+    "low": ZoomLevel.X5,
+    "medium": ZoomLevel.X10,
+    "high": ZoomLevel.X20,
+    "ultra": ZoomLevel.X40,
+    "4x": ZoomLevel.X5,
+}
 
 
 @dataclass
@@ -47,17 +60,31 @@ class Node:
     tier: Tier
     node_kind: NodeKind
     interaction: InteractionType
+    description: str = ""
     options: list[str] = field(default_factory=list)
     edges: dict[str, str] = field(default_factory=dict)
-    retrieval_level: RetrievalLevel = RetrievalLevel.HIGH
+    zoom_level: ZoomLevel = ZoomLevel.X20
     visual_policy: VisualPolicy = VisualPolicy.PATCH_RETRIEVE
     requires_visual_evidence: bool = True
     is_leaf: bool = False
     root: bool = False
 
     @property
+    def mag_band(self) -> str:
+        """Canonical zoom key for offline cache lookup (5x/10x/20x/40x)."""
+        return self.zoom_level.value
+
+    @property
+    def retrieval_text(self) -> str:
+        """CONCH text-encoder input: question + optional description."""
+        q = self.question.strip()
+        d = self.description.strip()
+        return f"{q} {d}".strip() if d else q
+
+    @property
     def retrieval_level_str(self) -> str:
-        return self.retrieval_level.value
+        """Backward compat alias — retrievers select embeddings_{mag_band}.pt."""
+        return self.mag_band
 
     def next_id(self, answer: str) -> str | None:
         if self.is_leaf:

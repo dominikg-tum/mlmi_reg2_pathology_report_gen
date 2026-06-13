@@ -228,5 +228,15 @@ data/*
 # Large PDF references (keep locally; markdown docs are tracked)
 docs/*.pdf
 
+# Local cluster SSH lock / pid files
+.auto_handoff.lock
+.submit_offline_wsi_batch_remote.lock
+scripts/local/cluster_env.local.sh
+
 # Run outputs
 runs/
+
+# macOS / SMB metadata (often copied onto cluster via Finder)
+.DS_Store
+._*
+.___pycache__

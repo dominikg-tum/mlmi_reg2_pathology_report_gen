@@ -14,15 +14,33 @@ ls /mnt/projects/mlmi/reg2
 
 | Path | Contents |
 |---|---|
-| `TUMUntera/` | WSI dataset (`.svs` files) |
+| `TUMUntera/TUM_Untera_data/` | WSI dataset (`.svs` files) — canonical path in `configs/paths.yaml` → `cluster.data_dir` |
 | `containers/` | Pre-built `.sqsh` images (`qwen25_graphrag.sqsh` = GraphRAG team base) |
 | `repos/` | Git repositories — **clone this project here** |
 | `reg2_repo/` | Legacy folder — **do not** put `mlmi_reg2_pathology_report_gen` here |
 | `models/` | Locally deployed VLMs (Qwen3-VL, InternVL, MedGemma, …) |
 | `scripts/` | Shared helper scripts |
 | `case_reports_to_korea_collaborators.xlsx` | Labels (`slide_ids`, `english_reports`, …) |
+| `dataset/` | Team thumbnail JPEG banks for Phase 1 — see below |
 | `requirements.txt` / `requirements_clean.txt` | Dependencies to install inside containers |
 | `dominik/` | Personal logs, cache, embeddings (`chmod 777`) |
+
+#### `dataset/` — thumbnail options (Phase 1, no CONCH required)
+
+```bash
+ls /mnt/projects/mlmi/reg2/dataset
+# thumbnails  thumbnails_kmeans  thumbnails_kmeans_5
+```
+
+| Directory | Role |
+|---|---|
+| `thumbnails/` | Default blurry whole-slide downsample (max edge 1024 px) |
+| `thumbnails_kmeans/` | Tissue-emphasized composite (k≈100) — good default while patch encode runs |
+| `thumbnails_kmeans_5/` | Coarser tissue summary (k=5) — ablation only |
+
+460 slides each, named `TUM_Uterus_XXXX.jpg` (stem of `TUM_Uterus_XXXX.svs`).
+
+Pick the bank in `configs/vision.yaml` → `thumbnail.variant` (`thumbnails` \| `thumbnails_kmeans` \| `thumbnails_kmeans_5`); `thumbnail.dataset_root` points at `/mnt/projects/mlmi/reg2/dataset`. Falls back to `{cache_root}/{slide_id}/thumbnail.png` if missing. Full detail: [PROJECT_OVERVIEW.md §2a](PROJECT_OVERVIEW.md#2a-thumbnail-options-cluster).
 
 This repository should be cloned to:
 
@@ -39,9 +57,11 @@ are older copies; prefer `extraction/` in the repo and outputs under `data/` (se
 ## 2. Golden Rules
 
 1. **Never run heavy commands on the head node** — always start a SLURM job first (`srun` or `sbatch`).
-2. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
-3. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
-4. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
+2. **Always run GPU work inside enroot** — model load, offline encode, Phase 1/2 inference, and eval jobs mount `/mnt` and use the container from `configs/paths.yaml` → `user.container_sqsh`.
+3. **Cursor / VS Code SSH must NOT request a GPU** — use `scripts/cluster/start_cursor_ssh.sh` on **`12g`**, CPU only. Do **not** use `/mnt/general/examples/ssh.sh` (GPU + idle cancel). Do **not** use **`24g`** for a GPU-less editor job (24g auto-cancels jobs with no GPU use after 2 h).
+4. **Never overwrite shared `.sqsh` files** — export your changes to a **new** file every time.
+5. **Name personal containers** `yourname_YYYYMMDD_description.sqsh` so the team can track versions.
+6. **Use `chmod 777`** on personal folders under `/mnt/projects/mlmi/reg2/` so teammates can read logs and outputs.
 
 ---
 
@@ -93,17 +113,28 @@ enroot start --root --rw \
   dominik_mlmi
 ```
 
-### 3.3 Install dependencies (inside the container)
+### 3.3 Install dependencies
+
+**Local laptop** (unit tests only — no openslide/GPU):
 
 ```bash
-pip list
-cat /mnt/projects/mlmi/reg2/requirements_clean.txt
+cd mlmi_reg2_pathology_report_gen
+uv venv && uv sync --extra dev
+uv run pytest tests/
+```
 
+**Inside the cluster container** (GPU jobs):
+
+```bash
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+
+# preferred — editable install with lockfile
+uv pip install -e ".[dev,cluster]"
+
+# or legacy pip
 pip install -r /mnt/projects/mlmi/reg2/requirements_clean.txt
-pip install -r /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/requirements.txt
-
-# WP1 / WP2 extras
-pip install openslide-python opencv-python-headless tqdm
+pip install -r requirements.txt
+pip install openslide-python scikit-learn tqdm
 
 exit
 ```
@@ -125,8 +156,8 @@ echo "Saved! Don't forget: always save to a new file after changes."
 ### 4.1 Start an interactive GPU session
 
 ```bash
-# From head — 24G partition, one GPU, 32G RAM
-srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
+# From head — 24G partition, one GPU (CPU/RAM auto-allocated per GPU)
+srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
 ```
 
 ### 4.2 Create your working directory
@@ -179,20 +210,35 @@ git push
 
 Cursor uses the same Remote SSH flow as VS Code.
 
-### 6.1 Launch an SSH job from head
+### 6.1 Launch an SSH job from head (CPU only — no GPU)
+
+**Do not** use the cluster template `/mnt/general/examples/ssh.sh` — it requests `--gres=gpu:1`.
+Cursor is an editor session and keeps the GPU at 0% util; the scheduler may auto-cancel
+after ~2 hours and wastes a GPU slot that preprocessing jobs need.
+
+Use the repo script instead (`12g` partition, no `--gres=gpu`):
 
 ```bash
-sbatch --partition=24g /mnt/general/examples/ssh.sh
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+sbatch scripts/cluster/start_cursor_ssh.sh
 sleep 15
-cat ssh.out
+tail -20 /mnt/projects/mlmi/reg2/dominik/logs/cursor_ssh_<JOBID>.out
 # Example output:
 # ssh -p 22445 dominikgarstenauer@essen.garching.camp.cluster
 # code --folder-uri vscode-remote://ssh-remote+dominikgarstenauer@essen...
 ```
 
+If you still have an old GPU SSH job running, cancel it after connecting via the new job:
+
+```bash
+scancel <old-ssh-jobid>    # e.g. scancel 10333
+```
+
 In Cursor: **Ctrl+Shift+P** → **Remote-SSH: Connect to Host** → paste the `ssh -p PORT user@node...` command, or use the `code --folder-uri` line.
 
 Open folder: `/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen`
+
+GPU preprocessing / training: submit **separate** `sbatch` jobs (e.g. `scripts/cluster/run_offline_wsi.sh`) — never through the Cursor SSH allocation.
 
 ### 6.2 Recommended Cursor / VS Code settings
 
@@ -285,8 +331,8 @@ Works everywhere but is less convenient for frequent pushes.
 #### Typical day-to-day loop (Cursor + GitHub)
 
 ```bash
-# 1. From head — start SSH job for Cursor
-sbatch --partition=24g /mnt/general/examples/ssh.sh && sleep 15 && cat ssh.out
+# 1. From head — start CPU-only SSH job for Cursor (no GPU)
+sbatch scripts/cluster/start_cursor_ssh.sh && sleep 15 && tail -20 /mnt/projects/mlmi/reg2/dominik/logs/cursor_ssh_*.out
 
 # 2. In Cursor: Remote-SSH → connect → open repo folder
 
@@ -315,21 +361,25 @@ the live model name / port with teammates.
 ### 7.1 What's deployed where
 
 ```bash
-ls /mnt/projects/mlmi/reg2/models/          # local model weights
+ls /mnt/projects/mlmi/reg2/containers/    # team + personal .sqsh exports
+ls /mnt/projects/mlmi/reg2/models/        # local model weights (table below)
 ls /mnt/projects/mlmi/reg2/repos/         # TITAN, Patho-R1, quilt-llava, …
 grep -i qwen /mnt/projects/mlmi/reg2/scripts/*.sh   # team helper scripts
 ```
 
+**Only these five weight dirs exist today** — verify with `ls /mnt/projects/mlmi/reg2/models/`:
+
 | Asset | Path | Role |
 |---|---|---|
-| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | MVP VLM — default in `configs/paths.yaml` and `start_qwen_server.sh` |
-| **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Larger upper-bound baseline |
-| **InternVL3_5-8B / 14B** | `models/InternVL3_5-8B`, `InternVL3_5-14B` | LoRA fine-tune candidates |
-| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | Small medical VLM baseline |
+| **Qwen3-VL-8B-Instruct** | `models/Qwen3-VL-8B-Instruct` | **Default Phase 1 VLM** — vLLM (`start_qwen_server.sh`) + HF agent path |
+| **Qwen3-VL-30B-A3B-Instruct** | `models/Qwen3-VL-30B-A3B-Instruct` | Phase 1 upper-bound eval (2× GPU) |
+| **InternVL3_5-8B** | `models/InternVL3_5-8B` | Phase 1 ablation + LoRA substrate |
+| **InternVL3_5-14B** | `models/InternVL3_5-14B` | Phase 1 upper-bound ablation (2× GPU) |
+| **medgemma-1.5-4b-it** | `models/medgemma-1.5-4b-it` | **Default Phase 2 report LLM** — not Phase 1 node answerer |
 | **TITAN** | `repos/TITAN` | Frozen image + text encoders for retrieval (WP2) |
 | **Patho-R1** | `repos/Patho-R1` | Pathology reasoning baseline |
 
-All paths are listed in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
+Phase 1 vs Phase 2 roles and verdicts: [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2). Paths in [`configs/paths.yaml`](../configs/paths.yaml) under `models:`.
 
 Repo scripts live under `scripts/cluster/`:
 
@@ -345,10 +395,35 @@ SLURM scripts `source load_paths.sh` so container and model paths stay in sync w
 headers, `load_cluster_paths`, `enroot start --root --rw --mount /mnt:/mnt`, and logs under
 `dominik/logs/`.
 
-### 7.2 Qwen via vLLM (generative VLM / text)
+### 7.2 Phase 1 VLM — Qwen3-VL-8B-Instruct (current default)
 
-The cluster has **no public LLM API**. Models are served locally with
-[vLLM](https://docs.vllm.ai/) inside enroot.
+The staged default for graph node answering is **Qwen3-VL-8B-Instruct** (`models/Qwen3-VL-8B-Instruct`). WP3 extraction and the agent loop both use this weight dir today.
+
+| Path | When | How |
+|------|------|-----|
+| **vLLM server** | WP3 batch extraction, smoke tests, shared API | `sbatch scripts/cluster/start_qwen_server.sh` |
+| **HF `transformers`** | Phase 1 agent loop (multi-image patches per node) | Wire in `agent/backends.py` — load from `configs/paths.yaml` → `qwen.model_path` |
+
+Pattern (inside `srun` + enroot):
+
+```bash
+srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
+
+enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
+cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+
+python -m baselines.run_agent \
+  --backend qwen \
+  --visual patch_retrieve \
+  --retriever graph_guided \
+  --slide-id CASE.svs
+```
+
+**Alternatives on disk:** InternVL3.5-8B (ablation / LoRA), Qwen3-VL-30B (upper bound, 2× GPU).
+
+### 7.3 Qwen via vLLM (WP3 + Phase 1 API path)
+
+[vLLM](https://docs.vllm.ai/) with **Qwen3-VL-8B** inside enroot — paths from `configs/paths.yaml`.
 
 #### Check if a server is already running
 
@@ -383,7 +458,7 @@ edit `qwen.model_path` and `qwen.model_name` in `configs/paths.yaml` (e.g. to
 #### Start interactively (debugging)
 
 ```bash
-srun --partition=24g --qos=students_normal --gres=gpu:2 --mem=60G --pty bash -l
+srun --partition=24g --qos=students_normal --gres=gpu:2 --pty bash -l
 
 enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   /mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh \
@@ -430,14 +505,13 @@ OpenAI-compatible endpoint with guided decoding.
 > `hostname` inside the server job) and ensure both jobs landed on the same node,
 > or run client + server in the same `srun` session.
 
-### 7.3 TITAN (retrieval encoder — not a chat server)
+### 7.4 TITAN / CONCH (retrieval encoder — not a chat server)
 
-TITAN is a **frozen encoder**, not a generative API. You load weights from
-`repos/TITAN` and run batch encoding jobs — no vLLM, no port.
+TITAN + CONCH are **frozen encoders** loaded through one checkpoint (`MahmoodLab/TITAN`). Use `TitanEncoder.return_conch()` for offline patch encoding and `TitanEncoder.encode_text()` for retrieval queries — no separate CONCH HF loader, no vLLM, no port.
 
 Intended pipeline (WP2):
 
-1. **Extract patches** from `.svs` slides (`openslide`, 256×256 tiles).
+1. **Extract patches** from `.svs` slides (`openslide`, 512×512 tiles at ×10/×20).
 2. **Encode patches** with the TITAN image encoder → cache per slide:
    `embeddings.pt` `[N×768]` + `coords.pt` `[N×2]`.
 3. **Retrieve at inference** via `retrieval/titan_cosine.py` (cosine similarity
@@ -453,7 +527,7 @@ sbatch scripts/cluster/encode_titan.sh      # encodes all slides → dominik/emb
 Interactive smoke test on one slide:
 
 ```bash
-srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l
+srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi
 cd /mnt/projects/mlmi/reg2/repos/TITAN
@@ -470,9 +544,15 @@ chmod 777 /mnt/projects/mlmi/reg2/dominik/embeddings
 
 See [`docs/PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) for the full TITAN wiring checklist.
 
-### 7.4 Other deployed models (Patho-R1, InternVL, MedGemma)
+### 7.5 Other deployed models (InternVL, MedGemma, Patho-R1)
 
-Same general pattern applies:
+| Model | Serve pattern | Project role |
+|---|---|---|
+| **InternVL3.5-8B / 14B** | HuggingFace `transformers` (multi-image batch in script) | Phase 1 node VLM — LoRA fine-tune target; 14B needs 2× GPU |
+| **medgemma-1.5-4b-it** | HF or vLLM (test which fits) | Phase 2 report LLM — **not** per-patch node Q&A |
+| **Patho-R1** | Batch inference from `repos/Patho-R1` | Reasoning baseline / CoT supervision |
+
+General steps:
 
 | Step | Action |
 |---|---|
@@ -482,27 +562,29 @@ Same general pattern applies:
 | 4 | Record model path + port in `configs/paths.yaml` |
 | 5 | Expose as an `AnswerBackend` in `agent/backends.py` or `baselines/run_agent.py` |
 
-For HuggingFace-style models, the team container already has PyTorch + transformers.
-For vLLM-served models, copy `start_qwen_server.sh` and point `qwen.model_path` in
+For HuggingFace-style models (InternVL, MedGemma), the team container already has PyTorch + transformers.
+For vLLM-served models (Qwen3-VL), copy `start_qwen_server.sh` and point `qwen.model_path` in
 `paths.yaml` at another entry under `models:` (+ adjust GPU count in the script).
 
-### 7.5 SLURM script checklist (repo convention)
+Model selection rationale: [PROJECT_OVERVIEW.md §2](PROJECT_OVERVIEW.md#model-roles--selection-phase-1-vs-phase-2).
+
+### 7.6 SLURM script checklist (repo convention)
 
 When adding `scripts/cluster/my_job.sh`:
 
 ```bash
 #!/bin/bash
 #SBATCH --job-name=my-job
+#SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
-#SBATCH --gres=gpu:1          # scale up for big models
-#SBATCH --mem=32G
+#SBATCH --gres=gpu:1          # scale up for big models; CPU/RAM follow GPU count
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/my_job_%j.err
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/load_paths.sh"
+# Use absolute path — sbatch copies the script to /var/spool/slurmd/…
+source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
 load_cluster_paths
 mkdir -p "${LOGS_DIR}"
 
@@ -547,12 +629,15 @@ inside the container set in `user.container_sqsh` (team `qwen25_dev_updated.sqsh
 
 | Task | Command |
 |---|---|
-| Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --mem=32G --pty bash -l` |
-| Cursor SSH job | `sbatch --partition=24g /mnt/general/examples/ssh.sh` |
-| Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp dominik_mlmi` |
-| Export container | `enroot export --force --output .../dominik_$(date +%Y%m%d)_base.sqsh dominik_mlmi` |
+| List containers / models | `ls /mnt/projects/mlmi/reg2/containers/` · `ls /mnt/projects/mlmi/reg2/models/` |
+| First-time container | Import team base → `enroot create --name yourname_mlmi` → install deps → export (§3) |
+| Interactive GPU | `srun --partition=24g --qos=students_normal --gres=gpu:1 --pty bash -l` |
+| Cursor SSH job (CPU only) | `sbatch scripts/cluster/start_cursor_ssh.sh` — **not** `/mnt/general/examples/ssh.sh` |
+| Start container | `enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp yourname_mlmi` |
+| Export container | `enroot export --force --output .../yourname_$(date +%Y%m%d)_base.sqsh yourname_mlmi` |
 | Git pull/push | `cd .../repos/mlmi_reg2_pathology_report_gen && git pull` |
-| Start Qwen (vLLM) | `sbatch scripts/cluster/start_qwen_server.sh` |
+| Phase 1 VLM (default) | Qwen3-VL-8B — vLLM: `sbatch scripts/cluster/start_qwen_server.sh` — see §7.2 |
+| Phase 2 report LLM | MedGemma 1.5 4B — `models/medgemma-1.5-4b-it` |
 | Test Qwen client | `python extraction/qa_extractor.py` |
 | WP3 extraction | `python extraction/extract_report_parts.py` |
 | Explore WSI (batch) | `sbatch scripts/cluster/explore_data.sh` |

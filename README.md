@@ -165,8 +165,26 @@ Full IDE setup (settings JSON, GitHub keys, day-to-day loop): [docs/cluster_setu
 | DOGA   | Graph JSONL    | `data/graph/execution_graph.jsonl`                       |
 | NICK   | Semantic RAG   | `memory/hipporag2.py`, `memory/graphrag.py`              |
 | DOMI   | WSI, WP3, LoRA | `vision/`, `scripts/vision/`, `extraction/`, `training/` |
-| XUN    | VLM serve      | `configs/paths.yaml`, `scripts/cluster/`                 |
 
+
+**DOMI quick commands (cluster):**
+
+```bash
+# Baseline 1 — blurry thumbnail (no GPU)
+python -m scripts.vision.build_thumbnail_cache --slide YOUR.svs
+python -m baselines.run_agent --backend qwen --visual thumbnail --slide-id YOUR.svs
+
+# Baseline 2 — TITAN slide embedding (GPU + HF token)
+python -m scripts.vision.encode_slide_embeddings --slide YOUR.svs
+python -m baselines.run_agent --backend qwen --visual slide_embed --slide-id YOUR.svs
+
+# P2 — patch retrieval (tile → verify → encode → k-means → demo)
+# See retrieval/README.md and vision/README.md for full cluster pipeline.
+```
+
+See `vision/README.md` for sbatch jobs.
+
+| XUN    | VLM serve      | `configs/paths.yaml`, `scripts/cluster/`                 |
 
 ## Repository structure
 
@@ -184,12 +202,27 @@ scripts/         manifest, vision cache jobs
 data/graph/      execution_graph.jsonl (seed)
 ```
 
-## Quick start
+## Dev environment
+
+Python **3.11**. Use [uv](https://docs.astral.sh/uv/) — `.venv` is gitignored.
 
 ```bash
 cd mlmi_reg2_pathology_report_gen
-pip install -r requirements.txt pyyaml numpy pytest
+uv venv                    # creates .venv/
+source .venv/bin/activate  # optional; uv run works without it
+uv sync --extra dev        # install from uv.lock
+uv run pytest tests/
+```
 
+Cluster container (openslide + torch + transformers):
+
+```bash
+uv pip install -e ".[dev,cluster]"
+```
+
+Fallback without uv: `pip install -r requirements.txt`
+
+```bash
 pytest tests/
 
 # P1 agent — thumbnail, no TITAN
@@ -207,8 +240,6 @@ python scripts/data/build_manifest.py --example-only
 
 ## Cluster
 
-Shared project root: `/mnt/projects/mlmi/reg2/` · repo checkout: `repos/mlmi_reg2_pathology_report_gen`.
+`/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen` — see [cluster_setup.md](docs/cluster_setup.md) (enroot quick-start, SLURM, vLLM).
 
-See **[docs/cluster_setup.md](docs/cluster_setup.md)** for SSH, enroot, SLURM, vLLM, and GitHub keys.
-
-Paths, models, and containers: `configs/paths.yaml`. Personal caches/logs: create `/mnt/projects/mlmi/reg2/<yourname>/` and point `configs/vision.yaml` `cache_root` there if needed.
+Shared assets: `containers/` (team `.sqsh` bases + per-person exports), `models/` (Qwen3-VL, InternVL, MedGemma). **Create your own container** per the §3 tutorial — do not overwrite shared images. Paths: `configs/paths.yaml`. Offline WSI cache: `configs/vision.yaml` (`cache_root` → `dominik/cache` on cluster).

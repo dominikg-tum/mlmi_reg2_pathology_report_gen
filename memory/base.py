@@ -16,9 +16,13 @@ def get_semantic_memory(method: str) -> SemanticMemory | None:
     if method in ("flat", "none", ""):
         return None
     if method == "hipporag2":
+        from pathlib import Path
+
         from memory.hipporag2 import HippoRAG2Memory
 
-        return HippoRAG2Memory()
+        repo = Path(__file__).resolve().parents[1]
+        index_path = repo / "data" / "memory" / "hipporag_index.json"
+        return HippoRAG2Memory(index_path=index_path)
     if method == "graphrag":
         from memory.graphrag import GraphRAGMemory
 

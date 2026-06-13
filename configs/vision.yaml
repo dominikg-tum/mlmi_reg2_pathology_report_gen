@@ -1,22 +1,71 @@
 # Offline WSI caches — matches cluster user.cache_dir in configs/paths.yaml
 cache_root: /mnt/projects/mlmi/reg2/dominik/cache
 
+# ENCODER CONSTRAINT (locked): CONCHv1.5 via MahmoodLab/TITAN return_conch() only.
+# Requires paired text encoder for question-conditioned cosine sim retrieval.
+# Do NOT switch to UNI2-h (vision-only). No KRONOS/SEAL (wrong modality).
+# ABMIL fallback: not implemented — question-blind; see retrieval.abmil_fallback.
+
 thumbnail:
   max_edge_px: 1024
   format: png
+  # Team flat JPEG banks (460 slides). Agent reads here first; falls back to cache_root/{slide_id}/thumbnail.png
+  dataset_root: /mnt/projects/mlmi/reg2/dataset
+  # thumbnails | thumbnails_kmeans | thumbnails_kmeans_5
+  variant: thumbnails_kmeans
 
+# Multi-scale tiling: native patch size per zoom → resize to conch_input_px before CONCH encode.
 magnification_bands:
-  low:
+  5x:
     objective: 5x
-    patch_size: 256
-  medium:
+    patch_size: 2048
+    conch_input_px: 224
+  10x:
     objective: 10x
-    patch_size: 256
-  high:
+    patch_size: 1024
+    conch_input_px: 224
+  20x:
     objective: 20x
+    patch_size: 512
+    conch_input_px: 224
+  40x:
+    objective: 40x
     patch_size: 256
+    conch_input_px: 224
+
+retrieval:
+  kmeans_k: 100
+  top_k: 5
+  top_k_by_zoom:
+    5x: 3
+    10x: 3
+    20x: 5
+    40x: 5
+  d_min_20x_px: 512
+  # CMT-style adjacent-scale context at retrieval (dual images to VLM, no learned fusion).
+  adjacent_scale:
+    enabled: true
+    parent_map:
+      40x: 20x
+      20x: 10x
+      10x: 5x
+    grandparent_for_integration: true  # tier=integration or node_kind integration/report
+  # CONCH offline: patch embedding pools per WSI (Phase 1 only).
+  # 40x omitted for batch run — slow full-slide scan; add back when graph nodes need it.
+  encode_levels:
+    - 5x
+    - 10x
+    - 20x
+  # abmil_fallback: reserved — only if cosine sim shows systematic failures (not implemented)
 
 defaults:
   visual: thumbnail
   retriever: none
   navigator: graph_guided
+
+titan:
+  model_id: MahmoodLab/TITAN
+  # Pinned runtime deps (install in enroot before encode): timm==1.0.3
+  # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — use container torch; see load_paths.sh
+  max_patches_per_slide: 512
+  batch_size: 16

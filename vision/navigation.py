@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from graph.schema import Node
@@ -22,10 +23,22 @@ class MagnificationNavigator(Protocol):
 
 
 class GraphGuidedNavigator:
-    """Uses node.retrieval_level + visual_policy (graph-as-MST)."""
+    """Uses node.zoom_level + visual_policy (graph-as-MST)."""
 
-    def __init__(self, visual_method: str = "thumbnail", cache_root=None):
-        self._visual = get_visual_provider(visual_method, cache_root=cache_root)
+    def __init__(
+        self,
+        visual_method: str = "thumbnail",
+        cache_root=None,
+        *,
+        wsi_path: Path | None = None,
+        wsi_data_dir: Path | None = None,
+    ):
+        self._visual = get_visual_provider(
+            visual_method,
+            cache_root=cache_root,
+            wsi_path=wsi_path,
+            wsi_data_dir=wsi_data_dir,
+        )
 
     def select_visual_bundle(
         self,
@@ -46,6 +59,8 @@ def get_navigator(method: str, **kwargs) -> MagnificationNavigator:
         return GraphGuidedNavigator(
             visual_method=kwargs.get("visual", "thumbnail"),
             cache_root=kwargs.get("cache_root"),
+            wsi_path=kwargs.get("wsi_path"),
+            wsi_data_dir=kwargs.get("wsi_data_dir"),
         )
     if method == "mnavagent":
         raise NotImplementedError(
