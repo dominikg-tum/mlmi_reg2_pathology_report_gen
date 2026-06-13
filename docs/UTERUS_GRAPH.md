@@ -140,6 +140,42 @@ and no dead ends.
 
 ---
 
+## 4a. Faithfulness to the original drawing (`uterus_graph.png`)
+
+The execution graph is **not** a 1:1 transcription of `uterus_graph.png`. The myometrium,
+junctional-zone, serosa, mass-lesion, pattern, cellular-feature, and integration nodes match
+the drawing's boxes directly; the **endometrium branch was deliberately deepened** to capture
+the next diagnostic step (subtype / grade / atypia), borrowing PathoGraph's staged-narrowing
+logic and matching the CAP report fields the Phase-2 LLM must emit. This table records exactly
+what is faithful vs. extended.
+
+| Node | In `uterus_graph.png`? | Notes |
+|------|------------------------|-------|
+| `organ_procedure` | Concept yes (Organ / Type of specimen / Procedure); **values no** | the drawing has a "Procedure" box but does not enumerate hysterectomy/curettage/biopsy — those option values were inferred |
+| `compartment` | Yes — the "Uterine tissue specimen" fan-out | faithful |
+| `endometrium_assessment` | Partly | drawing has 7 flat leaves; regrouped into 6 options + a sub-tree |
+| `endometrium_cycle_phase` | **Extended** | drawing has "Proliferative phase" + "Secretory phase" as leaves; added a phase node + "menstrual" |
+| `endometritis_type` | **Extended** | drawing has one "Endometritis" box |
+| `endometrial_hyperplasia_grade` | **Extended** | drawing has one "Endometrial hyperplasia" box; added the WHO atypia split (hyperplasia vs EIN) |
+| `endometrial_carcinoma_subtype` | **Extended** | drawing has one "Endometrial carcinoma" box |
+| `endometrial_carcinoma_grade` (FIGO) | **Extended** | not in the drawing at all; standard CAP reportable field |
+| `background_endometrium` | Yes | faithful |
+| `myometrium_assessment` | Yes — 6 children exact | faithful |
+| `smooth_muscle_tumor_assessment` (STUMP/triad) | **Extended** | drawing has Leiomyoma + Leiomyosarcoma as leaves, no criteria node |
+| `junctional_zone_assessment` | Yes | faithful |
+| `serosa_assessment` | Yes (+ added `unremarkable`) | faithful |
+| `mass_histologic_type` | Yes — "Histologic type", 6 children exact | faithful |
+| `microscopic_pattern` | Yes — 5 patterns | faithful |
+| `cellular_features` | Yes — 6 features exact | faithful |
+| `stage_extent` / `synthesis_interpretation` / `diagnosis` / `report` | Yes | faithful; option values added |
+
+**Open design question (pending team discussion):** the drawing's global tier
+(Organ / Type of specimen / Procedure → Uterine tissue specimen) is currently collapsed into
+the single `organ_procedure` root. Whether to keep it, slim it, or drop it entirely (making
+`compartment` the root) is still undecided.
+
+---
+
 ## 5. How it works at inference
 
 ### Deterministic traversal
@@ -171,7 +207,7 @@ displayed prompt. Retrieval only fires on `patch_retrieve` / `both` nodes;
 | 2 | `compartment` | 10x / thumbnail_only | `endometrium` | `endometrium_assessment` |
 | 3 | `endometrium_assessment` | 20x / patch_retrieve | `carcinoma` | `endometrial_carcinoma_subtype` |
 | 4 | `endometrial_carcinoma_subtype` | 20x / patch_retrieve | `endometrioid` | `endometrial_carcinoma_grade` |
-| 5 | `endometrial_carcinoma_grade` | 20x / patch_retrieve | `grade_1` | `background_endometrium` |
+| 5 | `endometrial_carcinoma_grade` | 20x / patch_retrieve | `grade_2` | `background_endometrium` |
 | 6 | `background_endometrium` | 20x / patch_retrieve | `hyperplastic_background` | `stage_extent` |
 | 7 | `stage_extent` | 20x / both | `superficial_invasion` | `synthesis_interpretation` |
 | 8 | `synthesis_interpretation` | 20x / both | `definitive` | `diagnosis` |
@@ -249,3 +285,70 @@ uv run pytest tests/test_graph_loader.py -q
   WHO-aligned subtypes without touching the integration tail.
 - **Ontology mirror:** an optional `data/graph/ontology_graph.jsonl` full drawio export can be
   added later (PROJECT_OVERVIEW §4).
+
+---
+
+## 10. Appendix — full case walkthrough
+
+A real case traced node-by-node, showing what the model sees, what it answers, and how the
+graph (not the model) selects the next node.
+
+**Case:** 64-year-old postmenopausal woman, postmenopausal bleeding, **hysterectomy** specimen
+with an endometrial mass. Final diagnosis: endometrioid endometrial adenocarcinoma.
+
+| Step | Node (zoom · policy) | What the model sees / decides | Answer | Graph routes to |
+|------|----------------------|-------------------------------|--------|-----------------|
+| 1 | `organ_procedure` (5x · thumbnail_only) | Whole-slide thumbnail: full uterus with wall + cavity. No patch retrieval at this node. | `uterus_hysterectomy` | `compartment` |
+| 2 | `compartment` (10x · thumbnail_only) | 10x thumbnail: thickened shaggy endometrial lining with a polypoid mass filling the cavity; myometrium intact. | `endometrium` | `endometrium_assessment` |
+| 3 | `endometrium_assessment` (20x · patch_retrieve) | Retrieval fires: CONCH pulls 20x patches of the most crowded glands → confluent back-to-back glands with atypia, stroma lost. | `carcinoma` | `endometrial_carcinoma_subtype` |
+| 4 | `endometrial_carcinoma_subtype` (20x · patch_retrieve) | Patches: cribriform/confluent glands with squamous morules (not high-grade serous papillae). | `endometrioid` | `endometrial_carcinoma_grade` |
+| 5 | `endometrial_carcinoma_grade` (20x · patch_retrieve) | ~20% solid non-squamous growth, moderate nuclear atypia. | `grade_2` | `background_endometrium` |
+| 6 | `background_endometrium` (20x · patch_retrieve) | Adjacent non-tumor endometrium is crowded/estrogen-driven → supports Type I. | `hyperplastic_background` | `stage_extent` |
+| 7 | `stage_extent` (20x · both) | Thumbnail (wall overview) + invasion-front patches: tumor in inner third of myometrium. | `superficial_invasion` | `synthesis_interpretation` |
+| 8 | `synthesis_interpretation` (20x · both) | Evidence coheres (carcinoma + endometrioid + grade 2 + hyperplastic background + superficial invasion). | `definitive` | `diagnosis` |
+| 9 | `diagnosis` (20x · both) | Final integrated category. | `malignant` | `report` |
+| 10 | `report` (20x · both, leaf) | Phase-2 LLM writes the CAP report from the accumulated chain. | report text | — stop |
+
+**Recorded reasoning chain (`node_path`):**
+
+```
+organ_procedure → compartment → endometrium_assessment →
+endometrial_carcinoma_subtype → endometrial_carcinoma_grade →
+background_endometrium → stage_extent → synthesis_interpretation →
+diagnosis → report
+```
+
+**Resulting CAP-style report (Phase 2 output):**
+
+```
+SPECIMEN: Uterus, hysterectomy.
+DIAGNOSIS: Endometrial adenocarcinoma, endometrioid type, FIGO grade 2.
+  - Myometrial invasion: present, inner half (superficial).
+  - Background endometrium: hyperplastic.
+  - Final category: malignant.
+```
+
+**What this demonstrates:**
+
+1. **The model never chose where to go** — at each node it only answered a classification
+   question; `edges[answer]` selected the next node. That determinism is what makes the chain
+   auditable for REG² scoring.
+2. **Zoom escalates with granularity:** 5x (specimen) → 10x (which layer) → 20x (cell/gland
+   calls); retrieval only fires at the 20x nodes where patches matter.
+3. **`description` does invisible work:** never shown as a question, but it steers CONCH to
+   fetch the right patches (crowded glands, squamous morules, invasion front).
+
+### Contrast — a different diagnosis takes a different path
+
+The same machinery, with different answers, walks a benign **leiomyoma**:
+
+```
+organ_procedure → compartment (myometrium) → myometrium_assessment (leiomyoma)
+→ smooth_muscle_tumor_assessment (none_benign) → synthesis_interpretation
+→ diagnosis (benign) → report
+```
+
+`smooth_muscle_tumor_assessment` is the present-vs-absent decision point: had it found
+**two or more** malignancy criteria (atypia + mitoses + coagulative necrosis), the edge would
+route `malignant_two_or_more → stage_extent`, and the diagnosis would resolve to a
+leiomyosarcoma instead. Same graph, different evidence → different deterministic path.
