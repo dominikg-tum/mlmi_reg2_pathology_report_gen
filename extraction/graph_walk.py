@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from agent.answers import normalize_answer
 from agent.types import Step
 from graph.schema import InteractionType, Node, NodeKind
 
@@ -32,13 +32,6 @@ class LlmClient(Protocol):
     def chat_completions_create(self, **kwargs: Any) -> Any: ...
 
 
-def _canonical_key(text: str) -> str:
-    text = text.strip().lower()
-    text = re.sub(r"[\s\-]+", "_", text)
-    text = re.sub(r"[^a-z0-9_]", "", text)
-    return text
-
-
 def build_step_prompt(node: Node, prior_steps: list[Step], report: str) -> str:
     """Mirror agent.controller.build_query with full report context."""
     if not prior_steps:
@@ -54,32 +47,6 @@ def build_step_prompt(node: Node, prior_steps: list[Step], report: str) -> str:
         opts = ", ".join(node.options)
         parts.append(f"Allowed answers (pick exactly one): {opts}")
     return "\n\n".join(parts)
-
-
-def normalize_answer(raw: str, node: Node) -> str | None:
-    """Map LLM output to a valid graph edge key, or None if no match."""
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-
-    if len(node.options) == 1:
-        return node.options[0]
-
-    if raw in node.edges:
-        return raw
-
-    raw_key = _canonical_key(raw)
-    for opt in node.options:
-        if _canonical_key(opt) == raw_key:
-            return opt
-        if opt in raw or raw in opt:
-            return opt
-
-    for opt in node.options:
-        if _canonical_key(opt) in raw_key or raw_key in _canonical_key(opt):
-            return opt
-
-    return None
 
 
 def extract_node_answer(

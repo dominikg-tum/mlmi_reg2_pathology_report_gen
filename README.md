@@ -225,6 +225,14 @@ Fallback without uv: `pip install -r requirements.txt`
 ```bash
 pytest tests/
 
+# Streamlit agent frontend
+uv sync --extra frontend
+streamlit run app.py
+
+# Lightweight image baseline:
+# upload one image, select a remote OpenAI-compatible VLM, run the full graph.
+# No TITAN, WSI cache, or patch embeddings are loaded.
+
 # P1 agent — thumbnail, no TITAN
 python -m baselines.run_agent --backend dummy --memory flat --visual thumbnail
 

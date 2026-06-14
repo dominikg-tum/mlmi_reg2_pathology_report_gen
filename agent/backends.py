@@ -8,9 +8,17 @@ from agent.types import Step
 
 if TYPE_CHECKING:
     import openai
-from graph.schema import InteractionType, Node
+from graph.schema import InteractionType, Node, NodeKind
 from vision.backends import VisualBundle
 from vision.vlm_messages import build_user_content
+
+SYSTEM_PROMPT = (
+    "You are a pathology visual question-answering assistant. Analyze only the "
+    "provided uterine whole-slide overview and retrieved tissue patches. Use prior "
+    "answers as context, but do not invent findings that are not supported by the "
+    "images. For a multiple-choice question, return exactly one allowed answer key "
+    "and no explanation."
+)
 
 
 class AnswerBackend(Protocol):
@@ -39,12 +47,30 @@ class ZeroShotQwenBackend:
     ) -> tuple[str, float]:
         history = "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in memory)
         visual_note = _visual_prompt_note(visual)
-        ctx = f"\n{extra_context}" if extra_context else ""
-        prompt = (
-            f"You are analyzing a uterine pathology slide.{visual_note}\n"
-            f"{history}{ctx}\n"
-            f"Current question: {node.question}\nAnswer:"
-        )
+        prompt_parts = [f"Visual evidence:{visual_note or ' none attached.'}"]
+        if history:
+            prompt_parts.append(f"Prior diagnostic answers:\n{history}")
+        if extra_context:
+            prompt_parts.append(f"Additional context:\n{extra_context}")
+        if node.description:
+            prompt_parts.append(f"Diagnostic guidance:\n{node.description}")
+        prompt_parts.append(f"Current question:\n{node.question}")
+        if node.options:
+            prompt_parts.append(
+                "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
+            )
+        if node.node_kind == NodeKind.REPORT:
+            prompt_parts.append(
+                "Combine the visual findings and all prior diagnostic answers into a "
+                "concise final pathology report. State the specimen/procedure when "
+                "supported, followed by the principal diagnosis and key qualifiers. "
+                "Do not mention the reasoning process or answer keys."
+            )
+        elif node.interaction == InteractionType.FREE_TEXT:
+            prompt_parts.append("Return a concise pathology answer.")
+        else:
+            prompt_parts.append("Return exactly one allowed answer key.")
+        prompt = "\n\n".join(prompt_parts)
         image_paths = _visual_image_paths(visual)
         content = build_user_content(prompt, image_paths)
 
@@ -55,7 +81,10 @@ class ZeroShotQwenBackend:
 
         resp = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": content}],
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ],
             temperature=0.0,
             logprobs=True,
             extra_body=extra_body or None,
@@ -78,8 +107,12 @@ def _visual_prompt_note(visual: VisualBundle | None) -> str:
             f"attached are overview thumbnail + {n_ev} tissue evidence patches.]"
         )
     if visual.thumbnail_path:
-        return "\n[Visual: whole-slide thumbnail attached.]"
-    return ""
+        patch_count = len(visual.patch_paths)
+        suffix = f" and {patch_count} retrieved patch images" if patch_count else ""
+        return f" whole-slide thumbnail{suffix} attached."
+    if visual.patch_paths:
+        return f" {len(visual.patch_paths)} retrieved patch images attached."
+    return " no image evidence attached."
 
 
 def _visual_image_paths(visual: VisualBundle | None) -> list:

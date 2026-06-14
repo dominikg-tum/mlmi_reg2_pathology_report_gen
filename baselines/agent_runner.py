@@ -62,11 +62,12 @@ def run_agent_traversal(
     navigator: str = "graph_guided",
     slide_id: str = "",
     cache_root: Path | None = None,
+    wsi_data_dir: Path | None = None,
     skip_report_nodes: bool = False,
     search_all_patches: bool = False,
 ) -> AgentRunResult:
     cfg = load_paths_config()
-    wsi_data_dir = Path(cfg["cluster"]["data_dir"])
+    wsi_data_dir = wsi_data_dir or Path(cfg["cluster"]["data_dir"])
     cache_root = cache_root or load_vision_cache_root()
 
     answer_backend = build_backend(backend, cfg)

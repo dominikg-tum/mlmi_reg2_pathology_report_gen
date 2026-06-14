@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agent.answers import normalize_answer
 from agent.backends import AnswerBackend
 from agent.correction import check_consistency, should_retry
 from agent.memory import CaseMemory, GraphStore, JsonGraphStore
 from agent.types import Step
 from graph import GRAPH, ROOT_ID, Node
-from graph.schema import InteractionType, NodeKind
+from graph.schema import NodeKind
 from retrieval.base import PatchRetriever, get_retriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
@@ -22,12 +23,6 @@ def build_query(node: Node, memory: list[Step]) -> str:
         return node.question
     context = "; ".join(f"{s.question} -> {s.answer}" for s in memory)
     return f"Given: {context}. {node.question}"
-
-
-def _format_answer(node: Node, raw: str) -> str:
-    if node.interaction == InteractionType.MULTI_SELECT:
-        return raw.strip()
-    return raw.strip()
 
 
 def traverse(
@@ -46,29 +41,34 @@ def traverse(
     wsi_data_dir: Path | None = None,
     max_steps: int = 64,
     confidence_threshold: float = 0.65,
+    max_answer_attempts: int = 2,
     skip_report_nodes: bool = False,
     search_all_patches: bool = False,
     retrieval_log: list[dict[str, Any]] | None = None,
+    fixed_visual_bundle: VisualBundle | None = None,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
     store = graph_store or JsonGraphStore(graph)
     mem = case_memory or CaseMemory()
-    retriever_kwargs: dict[str, Any] = {}
-    if retriever_method in ("titan_cosine", "graph_guided"):
-        from vision.encoders.titan import TitanEncoder
+    retriever: PatchRetriever | None = None
+    navigator = None
+    if fixed_visual_bundle is None:
+        retriever_kwargs: dict[str, Any] = {}
+        if retriever_method in ("titan_cosine", "graph_guided"):
+            from vision.encoders.titan import TitanEncoder
 
-        _encoder = TitanEncoder()
-        retriever_kwargs["text_encoder"] = _encoder.encode_text
-        retriever_kwargs["search_all_patches"] = search_all_patches
-    retriever: PatchRetriever | None = get_retriever(retriever_method, **retriever_kwargs)
-    navigator = get_navigator(
-        navigator_method,
-        visual=visual_method,
-        cache_root=cache_root,
-        wsi_path=wsi_path,
-        wsi_data_dir=wsi_data_dir,
-    )
+            _encoder = TitanEncoder()
+            retriever_kwargs["text_encoder"] = _encoder.encode_text
+            retriever_kwargs["search_all_patches"] = search_all_patches
+        retriever = get_retriever(retriever_method, **retriever_kwargs)
+        navigator = get_navigator(
+            navigator_method,
+            visual=visual_method,
+            cache_root=cache_root,
+            wsi_path=wsi_path,
+            wsi_data_dir=wsi_data_dir,
+        )
 
     node = store.get_node(root_id)
     steps: list[Step] = []
@@ -78,13 +78,16 @@ def traverse(
             break
 
         query = build_query(node, steps)
-        visual_bundle: VisualBundle = navigator.select_visual_bundle(
-            node,
-            slide_cache,
-            steps,
-            query=query,
-            retriever=retriever if node.needs_patch_retrieval() else None,
-        )
+        if fixed_visual_bundle is not None:
+            visual_bundle = fixed_visual_bundle
+        else:
+            visual_bundle = navigator.select_visual_bundle(
+                node,
+                slide_cache,
+                steps,
+                query=query,
+                retriever=retriever if node.needs_patch_retrieval() else None,
+            )
         if retrieval_log is not None:
             patches_meta = visual_bundle.metadata.get("retrieved_patches")
             if patches_meta:
@@ -97,17 +100,37 @@ def traverse(
                     }
                 )
         extra = mem.retrieve_context(node, query)
-        answer, confidence = backend.answer(
-            node, visual_bundle, steps, extra_context=extra
-        )
-        answer = _format_answer(node, answer)
-
-        if should_retry(confidence, confidence_threshold):
-            answer_retry, conf_retry = backend.answer(
-                node, visual_bundle, steps, extra_context=extra + "\n[Retry: reconsider]"
+        answer = ""
+        confidence = 0.0
+        last_raw = ""
+        for attempt in range(max_answer_attempts):
+            retry_note = ""
+            if attempt:
+                retry_note = (
+                    "\nRetry instruction: your previous response was not a valid graph "
+                    "answer. Return exactly one allowed answer key and nothing else."
+                )
+            raw, raw_confidence = backend.answer(
+                node,
+                visual_bundle,
+                steps,
+                extra_context=extra + retry_note,
             )
-            if conf_retry > confidence:
-                answer, confidence = _format_answer(node, answer_retry), conf_retry
+            last_raw = raw
+            normalized = normalize_answer(raw, node)
+            if normalized is None:
+                continue
+            if not answer or raw_confidence > confidence:
+                answer, confidence = normalized, raw_confidence
+            if not should_retry(confidence, confidence_threshold):
+                break
+
+        if not answer:
+            raise ValueError(
+                f"VLM failed to answer node {node.id!r} after "
+                f"{max_answer_attempts} attempts. Last response: {last_raw!r}; "
+                f"expected one of: {node.options}"
+            )
 
         _ = check_consistency(steps, node, answer)
 

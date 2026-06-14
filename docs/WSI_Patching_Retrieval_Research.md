@@ -14,7 +14,7 @@
 | Offline backbone | CONCHv1.5 (`MahmoodLab/CONCH`, 768-d) + TITAN slide encoder (`MahmoodLab/TITAN`, 1024-d) |
 | Tiling (locked) | **Four zoom levels**, non-overlapping native patch sizes → resize to **224×224** before CONCH encode |
 | Agent workflow | Graph Q&A → **`node.zoom_level`** → load `patch_embeddings_{tier}.pt` → **K-means centroid pool (default)** → `TitanEncoder.encode_text()` cosine → raw patches → VLM |
-| Report stage | **MedGemma 1.5 4B** (only staged report LLM) + projected **TITAN slide embedding (@ ×20 only)** (Phase 2) — see [PROJECT_OVERVIEW.md §2d](PROJECT_OVERVIEW.md#2d-model-deployment-status--todos) |
+| Report stage | **MedGemma 1.5 4B** chain-only baseline today; optional slide context via native images or trained TITAN adapter (Phase 2) — see [PROJECT_OVERVIEW.md §2e](PROJECT_OVERVIEW.md#2e-images-vs-embeddings--when-to-use-what) |
 | Thumbnail baseline | **Done on cluster** — `/mnt/projects/mlmi/reg2/dataset/thumbnails/` |
 | Hardware | 1× A100-80G or 2× A100-40G |
 
