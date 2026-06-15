@@ -16,6 +16,14 @@ pillow>=10.0
 # huggingface_hub
 # tqdm
 
+# RAG System
+# langchain
+# langchain-community
+# langchain-huggingface
+# langchain-chroma
+# rank-bm25
+# sentence-transformers
+
 # Optional eval / training
 # pandas
 # rouge-score
