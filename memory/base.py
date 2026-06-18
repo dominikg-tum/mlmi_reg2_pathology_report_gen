@@ -31,5 +31,7 @@ def get_semantic_memory(method: str) -> SemanticMemory | None:
     if method == "hybridrag":
         from memory.hybridrag import HybridRAGMemory
 
-        return HybridRAGMemory()
+        memory = HybridRAGMemory()
+        memory.ensure_loaded()
+        return memory
     raise ValueError(f"Unknown memory method: {method!r}")
