@@ -18,6 +18,7 @@ class CaseRecord:
     chain: list[ChainStep] = field(default_factory=list)
     report: str = ""
     node_path: list[str] = field(default_factory=list)
+    split: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> CaseRecord:
@@ -37,4 +38,5 @@ class CaseRecord:
             chain=steps,
             report=raw.get("report") or raw.get("final_report", ""),
             node_path=path or raw.get("node_path", []),
+            split=str(raw.get("split", "") or ""),
         )

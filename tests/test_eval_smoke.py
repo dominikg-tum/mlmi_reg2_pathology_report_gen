@@ -2,7 +2,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from eval.run_eval import load_jsonl
+from eval.run_eval import load_jsonl, select_eval_keys
 from eval.schemas import CaseRecord
 
 
@@ -31,3 +31,19 @@ def test_eval_overlap():
         gts = load_jsonl(g)
         assert "s1" in preds
         assert CaseRecord.from_dict(pred).report == "report text"
+
+
+def test_select_eval_keys_filters_by_gt_split():
+    preds = {
+        "train.svs": CaseRecord(slide_id="train.svs"),
+        "test.svs": CaseRecord(slide_id="test.svs"),
+    }
+    gts = {
+        "train.svs": CaseRecord(slide_id="train.svs", split="train"),
+        "test.svs": CaseRecord(slide_id="test.svs", split="test"),
+    }
+
+    assert select_eval_keys(preds, gts) == ["test.svs", "train.svs"]
+    assert select_eval_keys(preds, gts, split="test") == ["test.svs"]
+    assert select_eval_keys(preds, gts, split="train") == ["train.svs"]
+    assert select_eval_keys(preds, gts, split="val") == []

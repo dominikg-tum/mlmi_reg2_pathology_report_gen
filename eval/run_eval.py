@@ -27,17 +27,39 @@ def load_jsonl(path: Path) -> dict[str, CaseRecord]:
     return by_id
 
 
+def select_eval_keys(
+    preds: dict[str, CaseRecord],
+    gts: dict[str, CaseRecord],
+    *,
+    split: str = "",
+) -> list[str]:
+    """Return slide_ids present in both pred and gt, optionally filtered by gt split."""
+    keys = sorted(set(preds) & set(gts))
+    if not split:
+        return keys
+    return [k for k in keys if gts[k].split == split]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="REG² eval harness")
     parser.add_argument("--pred", type=Path, required=True)
     parser.add_argument("--gt", type=Path, required=True)
-    parser.add_argument("--split", type=str, default="")
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="",
+        help="Evaluate only GT records with this split (e.g. test).",
+    )
     args = parser.parse_args()
 
     preds = load_jsonl(args.pred)
     gts = load_jsonl(args.gt)
-    keys = sorted(set(preds) & set(gts))
+    keys = select_eval_keys(preds, gts, split=args.split)
     if not keys:
+        if args.split:
+            raise SystemExit(
+                f"No overlapping slide_ids between pred and gt for split={args.split!r}"
+            )
         raise SystemExit("No overlapping slide_ids between pred and gt")
 
     bpvs, f1s, messes, rouges, bleus, clin = [], [], [], [], [], []

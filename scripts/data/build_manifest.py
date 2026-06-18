@@ -1,4 +1,4 @@
-"""Build cases.csv with train/val/test split from labels xlsx."""
+"""Build cases.csv with train/test split from labels xlsx."""
 
 from __future__ import annotations
 
