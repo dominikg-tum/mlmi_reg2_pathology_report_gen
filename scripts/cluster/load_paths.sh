@@ -74,6 +74,13 @@ pip install -q openslide-python pillow pyyaml tqdm huggingface_hub 2>/dev/null |
 EOF
 }
 
+cluster_hybridrag_pip_snippet() {
+  cat <<'EOF'
+pip install -q pandas openpyxl pyyaml tqdm 2>/dev/null || true
+pip install -q langchain-core langchain-community langchain-huggingface langchain-chroma langchain-classic rank-bm25 sentence-transformers 2>/dev/null || true
+EOF
+}
+
 load_cluster_paths() {
   load_user_env
 
