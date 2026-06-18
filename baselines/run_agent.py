@@ -6,7 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
-from baselines.agent_runner import run_agent_traversal
+from baselines.agent_runner import (
+    default_runs_dir,
+    run_agent_traversal,
+    write_phase1_outputs,
+)
 
 
 def main() -> None:
@@ -18,8 +22,12 @@ def main() -> None:
     parser.add_argument("--navigator", default="graph_guided")
     parser.add_argument("--slide-id", default="")
     parser.add_argument("--search-all-patches", action="store_true")
+    parser.add_argument("--runs-dir", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
+
+    if not args.slide_id:
+        raise SystemExit("--slide-id is required")
 
     result = run_agent_traversal(
         backend=args.backend,
@@ -31,6 +39,9 @@ def main() -> None:
         search_all_patches=args.search_all_patches,
     )
     text = json.dumps(result.chain, indent=2)
+    runs_dir = args.runs_dir or default_runs_dir()
+    out_path = write_phase1_outputs(result, runs_dir, args.slide_id)
+    print(f"Wrote {out_path}")
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n")

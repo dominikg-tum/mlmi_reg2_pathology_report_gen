@@ -113,6 +113,9 @@ def write_phase1_outputs(
     out_dir.mkdir(parents=True, exist_ok=True)
     chain_path = out_dir / "cot_chain.json"
     chain_path.write_text(json.dumps(result.chain, indent=2) + "\n")
+    report = str(result.chain.get("report", "") or "").strip()
+    if report:
+        (out_dir / "report.txt").write_text(report + "\n")
     if result.retrieval_log:
         (out_dir / "retrieval_log.json").write_text(
             json.dumps(result.retrieval_log, indent=2) + "\n"
