@@ -5,14 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from agent.answers import normalize_answer
+from agent.answers import _answer_text, normalize_answer
 from agent.types import Step
 from graph.schema import InteractionType, Node, NodeKind
+
+NOT_MENTIONED = "not_mentioned"
+SYNTHESIS_NODE_ID = "synthesis_interpretation"
+DIAGNOSIS_NODE_ID = "diagnosis"
 
 SYSTEM_PROMPT = (
     "You are a pathology expert. Answer the current diagnostic question based ONLY "
     "on the provided pathology report. Pick exactly one allowed option when choices "
-    "are given. If the report does not support any option, answer 'not_mentioned'."
+    "are given. Prefer the closest supported option when the report partially "
+    "addresses the question. Use not_mentioned only when the report clearly does "
+    "not address this question or the specimen is outside the uterine graph scope."
 )
 
 MAX_WALK_STEPS = 64
@@ -32,6 +38,25 @@ class LlmClient(Protocol):
     def chat_completions_create(self, **kwargs: Any) -> Any: ...
 
 
+def normalize_extraction_answer(raw: str, node: Node) -> str | None:
+    """Graph-walk answer normalization; accepts not_mentioned for WP3 extraction."""
+    text = _answer_text(raw).lower().replace(" ", "_").replace("-", "_")
+    if text in ("not_mentioned", "notmentioned", "n/a", "na", "none"):
+        return NOT_MENTIONED
+    return normalize_answer(raw, node)
+
+
+def _guided_choices(node: Node) -> list[str]:
+    if node.interaction not in (InteractionType.SINGLE_SELECT, InteractionType.BOOLEAN):
+        return []
+    if not node.options:
+        return []
+    choices = list(node.options)
+    if NOT_MENTIONED not in choices:
+        choices.append(NOT_MENTIONED)
+    return choices
+
+
 def build_step_prompt(node: Node, prior_steps: list[Step], report: str) -> str:
     """Mirror agent.controller.build_query with full report context."""
     if not prior_steps:
@@ -44,9 +69,46 @@ def build_step_prompt(node: Node, prior_steps: list[Step], report: str) -> str:
     if node.description:
         parts.append(f"Context: {node.description.strip()}")
     if node.options:
-        opts = ", ".join(node.options)
+        opts = ", ".join(_guided_choices(node))
         parts.append(f"Allowed answers (pick exactly one): {opts}")
     return "\n\n".join(parts)
+
+
+def _append_step(
+    steps: list[Step],
+    node: Node,
+    answer: str,
+    graph: dict[str, Node],
+    next_id: str | None,
+) -> None:
+    next_q = graph[next_id].question if next_id and next_id in graph else ""
+    steps.append(
+        Step(
+            node_id=node.id,
+            question=node.question,
+            answer=answer,
+            confidence=1.0,
+            next_question=next_q,
+        )
+    )
+
+
+def _resolve_next_node(
+    node: Node,
+    answer: str,
+    graph: dict[str, Node],
+) -> tuple[str | None, Node | None]:
+    """Return (next_id, next_node). Short-circuit to synthesis on not_mentioned."""
+    if answer == NOT_MENTIONED:
+        if node.id in (SYNTHESIS_NODE_ID, DIAGNOSIS_NODE_ID):
+            return None, None
+        if SYNTHESIS_NODE_ID in graph:
+            return SYNTHESIS_NODE_ID, graph[SYNTHESIS_NODE_ID]
+        return None, None
+    next_id = node.next_id(answer)
+    if next_id is None:
+        return None, None
+    return next_id, graph[next_id]
 
 
 def extract_node_answer(
@@ -61,9 +123,9 @@ def extract_node_answer(
     """One vLLM call per node with guided_choice when options exist."""
     prompt = build_step_prompt(node, prior_steps, report)
     extra_body: dict[str, Any] = {}
-    if node.interaction in (InteractionType.SINGLE_SELECT, InteractionType.BOOLEAN):
-        if node.options:
-            extra_body["guided_choice"] = node.options
+    choices = _guided_choices(node)
+    if choices:
+        extra_body["guided_choice"] = choices
 
     def _call(user_suffix: str = "") -> str:
         content = prompt + user_suffix
@@ -79,7 +141,7 @@ def extract_node_answer(
         return (response.choices[0].message.content or "").strip()
 
     raw = _call()
-    answer = normalize_answer(raw, node)
+    answer = normalize_extraction_answer(raw, node)
     if answer is not None:
         return answer
 
@@ -89,12 +151,12 @@ def extract_node_answer(
             "Use not_mentioned only if none apply.]"
         )
         raw = _call(retry_suffix)
-        answer = normalize_answer(raw, node)
+        answer = normalize_extraction_answer(raw, node)
         if answer is not None:
             return answer
 
     raise GraphWalkError(
-        f"Invalid answer for node {node.id!r}: {raw!r}; valid options: {node.options}"
+        f"Invalid answer for node {node.id!r}: {raw!r}; valid options: {_guided_choices(node)}"
     )
 
 
@@ -122,23 +184,16 @@ def walk_graph(
             break
 
         answer = extract_node_answer(client, model, node, report, steps)
-        next_id = node.next_id(answer)
-        next_q = graph[next_id].question if next_id and next_id in graph else ""
+        if answer == NOT_MENTIONED and node.id == SYNTHESIS_NODE_ID:
+            answer = "descriptive_only"
+        elif answer == NOT_MENTIONED and node.id == DIAGNOSIS_NODE_ID:
+            answer = "descriptive"
+        next_id, next_node = _resolve_next_node(node, answer, graph)
+        _append_step(steps, node, answer, graph, next_id)
 
-        steps.append(
-            Step(
-                node_id=node.id,
-                question=node.question,
-                answer=answer,
-                confidence=1.0,
-                next_question=next_q,
-            )
-        )
-
-        if next_id is None:
+        if next_id is None or next_node is None:
             break
 
-        next_node = graph[next_id]
         if next_node.node_kind == NodeKind.REPORT:
             break
         node = next_node

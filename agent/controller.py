@@ -86,7 +86,7 @@ def traverse(
                 slide_cache,
                 steps,
                 query=query,
-                retriever=retriever if node.needs_patch_retrieval() else None,
+                retriever=retriever,
             )
         if retrieval_log is not None:
             patches_meta = visual_bundle.metadata.get("retrieved_patches")
@@ -162,9 +162,16 @@ def chain_to_dict(
     *,
     include_report: bool = True,
 ) -> dict[str, Any]:
+    """Serialize traversal steps; report leaf answer goes in ``report`` only (GT parity)."""
+    cot_steps = steps
     report = ""
-    if include_report and steps:
+    if steps and steps[-1].node_id == "report":
+        if include_report:
+            report = steps[-1].answer
+        cot_steps = steps[:-1]
+    elif include_report and steps:
         report = steps[-1].answer
+
     return {
         "slide_id": slide_id,
         "chain-of-thought": [
@@ -174,8 +181,8 @@ def chain_to_dict(
                 "answer": s.answer,
                 "next_question": s.next_question,
             }
-            for s in steps
+            for s in cot_steps
         ],
-        "node_path": [s.node_id for s in steps],
+        "node_path": [s.node_id for s in cot_steps],
         "report": report,
     }

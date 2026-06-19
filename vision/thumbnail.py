@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from graph.schema import Node, VisualPolicy
+from graph.schema import Node
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
 def _resolve_wsi_path(
@@ -26,9 +26,11 @@ def _bundle_from_retrieved(
     slide_cache: SlideCache,
     *,
     out_subdir: str = "retrieved",
+    include_thumbnail: bool = False,
+    metadata: dict | None = None,
 ) -> VisualBundle:
-    bundle = VisualBundle(metadata={"visual": "patch_retrieve"})
-    if slide_cache.thumbnail_path:
+    bundle = VisualBundle(metadata=dict(metadata or {"visual": "patch_retrieve"}))
+    if include_thumbnail and slide_cache.thumbnail_path:
         bundle.thumbnail_path = slide_cache.thumbnail_path
 
     out_dir = (slide_cache.cache_dir or Path(".")) / out_subdir
@@ -50,21 +52,19 @@ def _bundle_from_retrieved(
             "similarity": rp.similarity,
         }
         if rp.patch_image is not None:
-            p = out_dir / f"patch_{i}_{rp.level}.png"
-            rp.patch_image.save(p)
+            p = out_dir / f"patch_{i}_{rp.level}.jpg"
+            rp.patch_image.convert("RGB").save(p, format="JPEG", quality=90)
             paths.append(p)
             row["patch_path"] = str(p)
         if rp.parent_image is not None:
             pl = rp.parent_level or "parent"
-            pp = out_dir / f"patch_{i}_parent_{pl}.png"
-            rp.parent_image.save(pp)
-            paths.append(pp)
+            pp = out_dir / f"patch_{i}_parent_{pl}.jpg"
+            rp.parent_image.convert("RGB").save(pp, format="JPEG", quality=90)
             row["parent_patch_path"] = str(pp)
         if rp.grandparent_image is not None:
             gl = rp.grandparent_level or "grandparent"
-            gp = out_dir / f"patch_{i}_grandparent_{gl}.png"
-            rp.grandparent_image.save(gp)
-            paths.append(gp)
+            gp = out_dir / f"patch_{i}_grandparent_{gl}.jpg"
+            rp.grandparent_image.convert("RGB").save(gp, format="JPEG", quality=90)
             row["grandparent_patch_path"] = str(gp)
         meta_rows.append(row)
 
@@ -93,28 +93,10 @@ class ThumbnailProvider:
         query: str,
         retriever=None,
     ) -> VisualBundle:
+        """Ablation baseline: whole-slide thumbnail on every node (ignores graph policy)."""
+        _ = node, query, retriever
         thumb = slide_cache.thumbnail_path if slide_cache else None
-        bundle = VisualBundle(thumbnail_path=thumb, metadata={"visual": "thumbnail"})
-        if node.visual_policy == VisualPolicy.BOTH and retriever is not None and slide_cache:
-            try:
-                wsi = _resolve_wsi_path(
-                    slide_cache, wsi_path=self.wsi_path, wsi_data_dir=self.wsi_data_dir
-                )
-                retrieved = retriever.retrieve(
-                    node.retrieval_text,
-                    slide_cache,
-                    level=node.mag_band,
-                    wsi_path=wsi,
-                    return_images=wsi is not None,
-                    tier=node.tier.value,
-                    node_kind=node.node_kind.value,
-                )
-                patch_bundle = _bundle_from_retrieved(retrieved, slide_cache, out_subdir="retrieved_both")
-                bundle.patch_paths = patch_bundle.patch_paths
-                bundle.metadata.update(patch_bundle.metadata)
-            except (RuntimeError, NotImplementedError, FileNotFoundError):
-                pass
-        return bundle
+        return VisualBundle(thumbnail_path=thumb, metadata={"visual": "thumbnail"})
 
 
 class NoneVisualProvider:
@@ -125,7 +107,7 @@ class NoneVisualProvider:
 
 
 class PatchRetrieveProvider:
-    """P2: top-K patches from offline cache via retriever."""
+    """Backward-compatible alias for graph-policy visual routing."""
 
     def __init__(
         self,
@@ -134,9 +116,13 @@ class PatchRetrieveProvider:
         wsi_path: Path | None = None,
         wsi_data_dir: Path | None = None,
     ):
-        self.cache_root = cache_root
-        self.wsi_path = wsi_path
-        self.wsi_data_dir = wsi_data_dir
+        from vision.graph_visual import GraphPolicyVisualProvider
+
+        self._delegate = GraphPolicyVisualProvider(
+            cache_root,
+            wsi_path=wsi_path,
+            wsi_data_dir=wsi_data_dir,
+        )
 
     def for_node(
         self,
@@ -146,19 +132,6 @@ class PatchRetrieveProvider:
         query: str,
         retriever=None,
     ) -> VisualBundle:
-        if retriever is None or slide_cache is None or not node.needs_patch_retrieval():
-            return VisualBundle(metadata={"visual": "patch_retrieve"})
-
-        wsi = _resolve_wsi_path(
-            slide_cache, wsi_path=self.wsi_path, wsi_data_dir=self.wsi_data_dir
+        return self._delegate.for_node(
+            node, slide_cache, query=query, retriever=retriever
         )
-        retrieved = retriever.retrieve(
-            node.retrieval_text,
-            slide_cache,
-            level=node.mag_band,
-            wsi_path=wsi,
-            return_images=wsi is not None,
-            tier=node.tier.value,
-            node_kind=node.node_kind.value,
-        )
-        return _bundle_from_retrieved(retrieved, slide_cache)

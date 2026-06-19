@@ -6,6 +6,7 @@ Produces supervised labels for eval and LoRA training.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def load_config(config_path: Path | None = None) -> dict[str, Any]:
     config_path = config_path or REPO_ROOT / "configs" / "paths.yaml"
     with config_path.open() as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    qwen = cfg.setdefault("qwen", {})
+    if os.environ.get("QWEN_API_BASE_URL"):
+        qwen["api_base_url"] = os.environ["QWEN_API_BASE_URL"]
+    if os.environ.get("QWEN_MODEL_NAME"):
+        qwen["model_name"] = os.environ["QWEN_MODEL_NAME"]
+    if os.environ.get("QWEN_API_KEY"):
+        qwen["api_key"] = os.environ["QWEN_API_KEY"]
+    return cfg
 
 
 def build_client(cfg: dict[str, Any]):

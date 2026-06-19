@@ -80,8 +80,10 @@ class TitanEncoder:
         self._ensure_loaded()
         import torch
 
+        tokenized = self._titan.text_encoder.tokenizer([text])
+        tokenized = tokenized.to(self.device)
         with torch.inference_mode():
-            out = self._titan.encode_text([text], normalize=True)
+            out = self._titan.encode_text(tokenized, normalize=True)
         if isinstance(out, torch.Tensor):
             vec = out[0]
         else:

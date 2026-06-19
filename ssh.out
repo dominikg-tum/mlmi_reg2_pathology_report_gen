@@ -1,0 +1,5 @@
+JOB ID: 10333
+ssh -p 29581 dominikgarstenauer@koblenz.garching.camp.cluster
+code --folder-uri vscode-remote://ssh-remote+dominikgarstenauer@koblenz.garching.camp.cluster:29581/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
+ssh -p 29581 dominikgarstenauer@131.159.11.36
+code --folder-uri vscode-remote://ssh-remote+dominikgarstenauer@131.159.11.36:29581/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen

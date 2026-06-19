@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,8 @@ def build_backend(name: str, cfg: dict | None = None) -> AnswerBackend:
         import openai
 
         q = cfg["qwen"]
-        client = openai.OpenAI(base_url=q["api_base_url"], api_key=q["api_key"])
+        api_base_url = os.environ.get("QWEN_API_BASE", q["api_base_url"])
+        client = openai.OpenAI(base_url=api_base_url, api_key=q["api_key"])
         return ZeroShotQwenBackend(client, q["model_name"])
     raise ValueError(f"Unknown backend: {name!r}")
 
@@ -57,10 +59,12 @@ def run_agent_traversal(
     *,
     backend: str = "dummy",
     memory: str = "flat",
+    memory_k: int = 5,
     visual: str = "thumbnail",
     retriever: str = "none",
     navigator: str = "graph_guided",
     slide_id: str = "",
+    wsi_slide_id: str | None = None,
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
     skip_report_nodes: bool = False,
@@ -69,11 +73,14 @@ def run_agent_traversal(
     cfg = load_paths_config()
     wsi_data_dir = wsi_data_dir or Path(cfg["cluster"]["data_dir"])
     cache_root = cache_root or load_vision_cache_root()
+    visual_slide_id = wsi_slide_id or slide_id
 
     answer_backend = build_backend(backend, cfg)
-    mem = CaseMemory.from_config(memory)
+    mem = CaseMemory.from_config(memory, memory_k=memory_k)
     slide_cache: SlideCache | None = (
-        build_slide_cache(cache_root, slide_id) if slide_id and cache_root else None
+        build_slide_cache(cache_root, visual_slide_id)
+        if visual_slide_id and cache_root
+        else None
     )
 
     retrieval_log: list[dict[str, Any]] = []
@@ -95,6 +102,8 @@ def run_agent_traversal(
         slide_id=slide_id,
         include_report=not skip_report_nodes,
     )
+    if wsi_slide_id and wsi_slide_id != slide_id:
+        chain["inference_wsi"] = wsi_slide_id
     return AgentRunResult(steps=steps, chain=chain, retrieval_log=retrieval_log)
 
 
@@ -104,11 +113,12 @@ def default_runs_dir(cfg: dict | None = None) -> Path:
     return work / "runs"
 
 
-def write_phase1_outputs(
+def write_run_outputs(
     result: AgentRunResult,
     runs_dir: Path,
     slide_id: str,
 ) -> Path:
+    """Write cot_chain.json (+ optional retrieval_log) for a full agent run."""
     out_dir = runs_dir / slide_id
     out_dir.mkdir(parents=True, exist_ok=True)
     chain_path = out_dir / "cot_chain.json"
@@ -118,3 +128,7 @@ def write_phase1_outputs(
             json.dumps(result.retrieval_log, indent=2) + "\n"
         )
     return chain_path
+
+
+# Backward-compatible alias
+write_phase1_outputs = write_run_outputs

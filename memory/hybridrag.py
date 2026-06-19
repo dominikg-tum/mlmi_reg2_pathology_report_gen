@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from graph.schema import Node, RetrievalLevel
+from graph.schema import Node, Tier
 import pandas as pd
 
 from langchain_core.documents import Document
@@ -41,12 +41,12 @@ class HybridRAGMemory(SemanticMemory):
     and abbreviations (e.g., "P40", "WT1") are not missed due to vector dilution.
     """
 
-    def __init__(self):
+    def __init__(self, chroma_storage: str | Path | None = None):
         """
         Initializes the HybridRAGMemory, setting up storage paths and the
         domain-specific embedding model.
         """
-        self.chroma_storage = get_chroma_storage_default()
+        self.chroma_storage = Path(chroma_storage) if chroma_storage else get_chroma_storage_default()
         self.vector_storage = None
         self.bm25_retriever = None
         self.ensemble_retriever = None
@@ -55,6 +55,105 @@ class HybridRAGMemory(SemanticMemory):
         # Initialise embedding model:
         # NeuML/pubmedbert-base-embeddings or BAAI/bge-m3 (more powerful but bigger) for pathology
         self.embeddings = HuggingFaceEmbeddings(model_name="NeuML/pubmedbert-base-embeddings")
+
+    def build_index_from_chains(
+        self,
+        chains_path: str | Path,
+        *,
+        split: str = "train",
+        force_rebuild: bool = False,
+    ) -> None:
+        """Index full report text from chains.jsonl for one split (train-only, no leakage)."""
+        import json
+
+        path = Path(chains_path)
+        if not path.exists():
+            raise FileNotFoundError(f"chains JSONL not found at '{path}'")
+
+        documents: list[Document] = []
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                if split and record.get("split") != split:
+                    continue
+                if record.get("extraction_status", "ok") != "ok":
+                    continue
+                report = str(record.get("report") or "").strip()
+                if not report:
+                    continue
+                slide_id = str(record.get("slide_id", ""))
+                documents.append(Document(page_content=report, metadata={"slide_id": slide_id}))
+
+        if not documents:
+            raise ValueError(f"No report documents found in {path} for split={split!r}")
+        self._build_from_documents(documents, force_rebuild=force_rebuild)
+
+    def _build_from_documents(self, documents: list[Document], *, force_rebuild: bool = False) -> None:
+        chroma_path = str(self.chroma_storage)
+        if force_rebuild and os.path.exists(chroma_path):
+            if self.vector_storage is not None:
+                try:
+                    self.vector_storage._client.close()
+                except Exception:
+                    pass
+                self.vector_storage = None
+                self.vector_retriever = None
+                self.ensemble_retriever = None
+                self.bm25_retriever = None
+            gc.collect()
+            shutil.rmtree(chroma_path)
+
+        if os.path.exists(chroma_path):
+            self.vector_storage = Chroma(
+                persist_directory=chroma_path,
+                embedding_function=self.embeddings,
+            )
+        else:
+            self.chroma_storage.mkdir(parents=True, exist_ok=True)
+            self.vector_storage = Chroma.from_documents(
+                documents,
+                self.embeddings,
+                persist_directory=chroma_path,
+            )
+
+        self.vector_retriever = self.vector_storage.as_retriever()
+        if not documents and self.vector_storage is not None:
+            documents = self._documents_from_chroma()
+        self.bm25_retriever = BM25Retriever.from_documents(documents, preprocess_func=clean_tokenize)
+        self.ensemble_retriever = EnsembleRetriever(
+            retrievers=[self.vector_retriever, self.bm25_retriever],
+            weights=[0.65, 0.35],
+        )
+
+    def _documents_from_chroma(self) -> list[Document]:
+        if self.vector_storage is None:
+            return []
+        data = self.vector_storage.get(include=["documents", "metadatas"])
+        docs: list[Document] = []
+        for text, meta in zip(data.get("documents") or [], data.get("metadatas") or []):
+            if text:
+                docs.append(Document(page_content=text, metadata=meta or {}))
+        return docs
+
+    def _ensure_index_loaded(self) -> None:
+        if self.ensemble_retriever is not None:
+            return
+        if not os.path.exists(self.chroma_storage):
+            return
+        self.vector_storage = Chroma(
+            persist_directory=str(self.chroma_storage),
+            embedding_function=self.embeddings,
+        )
+        documents = self._documents_from_chroma()
+        self.vector_retriever = self.vector_storage.as_retriever()
+        self.bm25_retriever = BM25Retriever.from_documents(documents, preprocess_func=clean_tokenize)
+        self.ensemble_retriever = EnsembleRetriever(
+            retrievers=[self.vector_retriever, self.bm25_retriever],
+            weights=[0.65, 0.35],
+        )
 
     def build_index(self, train_reports_path: str, *, split: str = "train", force_rebuild: bool = False) -> None:
         """
@@ -105,46 +204,7 @@ class HybridRAGMemory(SemanticMemory):
                 metadata={"slide_id": slide_id}
             ))
 
-        # Delete existing index if force_build
-        if force_rebuild and os.path.exists(self.chroma_storage):
-            if self.vector_storage is not None:
-                try:
-                    self.vector_storage._client.close()
-                except Exception:
-                    pass
-                self.vector_storage = None
-                self.vector_retriever = None
-                self.ensemble_retriever = None
-                self.bm25_retriever = None
-            gc.collect()
-            shutil.rmtree(self.chroma_storage)
-
-        # Load semantic embeddings storage from file
-        if os.path.exists(self.chroma_storage):
-            self.vector_storage = Chroma(
-                persist_directory=self.chroma_storage,
-                embedding_function=self.embeddings
-            )
-        # Create semantic embeddings and save to file
-        else:
-            self.vector_storage = Chroma.from_documents(
-                documents,
-                self.embeddings,
-                persist_directory=self.chroma_storage
-            )
-
-        # Create retriever in initialization progress
-        self.vector_retriever = self.vector_storage.as_retriever()
-
-        # Create BM25 retriever
-        self.bm25_retriever = BM25Retriever.from_documents(documents, preprocess_func=clean_tokenize)
-
-        # Combining semantic and BM25 retriever into ensemble
-        # Could also do ablation study on weights
-        self.ensemble_retriever = EnsembleRetriever(
-            retrievers=[self.vector_retriever, self.bm25_retriever],
-            weights=[0.65, 0.35]
-        )
+        self._build_from_documents(documents, force_rebuild=force_rebuild)
 
     def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
         """
@@ -167,14 +227,16 @@ class HybridRAGMemory(SemanticMemory):
         """
 
         if self.ensemble_retriever is None:
+            self._ensure_index_loaded()
+        if self.ensemble_retriever is None:
             raise RuntimeError("RAG: build_index() must be called before retrieve()")
 
-        # Update k dynamically based on retrieval level
+        # Update k dynamically based on graph tier
         effective_k = {
-            RetrievalLevel.LOW: max(1, k // 2),
-            RetrievalLevel.MEDIUM: k,
-            RetrievalLevel.HIGH: min(k * 2, 20),
-        }[node.retrieval_level]
+            Tier.GLOBAL_FEATURES: max(1, k // 2),
+            Tier.LOCAL_FEATURES: k,
+            Tier.INTEGRATION: min(k * 2, 20),
+        }[node.tier]
 
         # Update query to include node context
         enriched_query = f"[{node.tier.value}] {node.question} {query}".strip()

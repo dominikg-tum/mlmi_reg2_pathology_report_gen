@@ -3,8 +3,8 @@
 #SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --export=ALL
 #SBATCH --partition=24g
-#SBATCH --qos=students_normal
-#SBATCH --gres=gpu:2
+#SBATCH --qos=students_opportunistic
+#SBATCH --gres=gpu:1
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.err
 
@@ -24,4 +24,6 @@ enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   python -m vllm.entrypoints.openai.api_server \
     --model "${MODEL}" \
     --served-model-name "${MODEL_NAME}" \
+    --max-model-len "${MAX_MODEL_LEN:-8192}" \
+    --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.95}" \
     --port 8000

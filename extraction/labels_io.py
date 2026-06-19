@@ -93,6 +93,46 @@ def load_existing_slide_ids(path: Path) -> set[str]:
     return ids
 
 
+def load_failed_slide_ids(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    ids: set[str] = set()
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            raw = json.loads(line)
+            sid = raw.get("slide_id", "")
+            if sid and raw.get("extraction_status", "ok") != "ok":
+                ids.add(sid)
+    return ids
+
+
+def upsert_chains_jsonl(records: list[dict], path: Path) -> None:
+    """Replace records by slide_id and write the full JSONL back."""
+    updates = {rec["slide_id"]: rec for rec in records if rec.get("slide_id")}
+    if not updates:
+        return
+    existing: list[dict] = []
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                raw = json.loads(line)
+                sid = raw.get("slide_id", "")
+                if sid in updates:
+                    continue
+                existing.append(raw)
+    merged = existing + list(updates.values())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for rec in merged:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def write_chains_jsonl(records: list[dict], path: Path, *, append: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = "a" if append else "w"

@@ -8,6 +8,7 @@ from typing import Protocol
 from graph.schema import Node
 from vision.backends import VisualBundle, get_visual_provider
 from vision.cache import SlideCache
+from vision.graph_visual import GraphPolicyVisualProvider
 
 
 class MagnificationNavigator(Protocol):
@@ -23,7 +24,7 @@ class MagnificationNavigator(Protocol):
 
 
 class GraphGuidedNavigator:
-    """Uses node.zoom_level + visual_policy (graph-as-MST)."""
+    """Uses node.zoom_level + node.visual_policy (graph-as-MST)."""
 
     def __init__(
         self,
@@ -33,12 +34,19 @@ class GraphGuidedNavigator:
         wsi_path: Path | None = None,
         wsi_data_dir: Path | None = None,
     ):
-        self._visual = get_visual_provider(
-            visual_method,
-            cache_root=cache_root,
-            wsi_path=wsi_path,
-            wsi_data_dir=wsi_data_dir,
-        )
+        if visual_method == "patch_retrieve":
+            self._visual = GraphPolicyVisualProvider(
+                cache_root,
+                wsi_path=wsi_path,
+                wsi_data_dir=wsi_data_dir,
+            )
+        else:
+            self._visual = get_visual_provider(
+                visual_method,
+                cache_root=cache_root,
+                wsi_path=wsi_path,
+                wsi_data_dir=wsi_data_dir,
+            )
 
     def select_visual_bundle(
         self,
@@ -49,6 +57,7 @@ class GraphGuidedNavigator:
         query: str,
         retriever=None,
     ) -> VisualBundle:
+        _ = memory
         return self._visual.for_node(
             node, slide_cache, query=query, retriever=retriever
         )

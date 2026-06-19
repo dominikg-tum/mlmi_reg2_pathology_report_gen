@@ -28,9 +28,15 @@ class JsonGraphStore:
 class CaseMemory:
     """Episodic buffer + optional semantic RAG (NICK)."""
 
-    def __init__(self, semantic: SemanticMemory | None = None) -> None:
+    def __init__(
+        self,
+        semantic: SemanticMemory | None = None,
+        *,
+        memory_k: int = 5,
+    ) -> None:
         self.episodic = FlatEpisodicMemory()
         self.semantic = semantic
+        self.memory_k = memory_k
 
     def append(self, node_id: str, question: str, answer: str) -> None:
         self.episodic.append(node_id, question, answer)
@@ -43,7 +49,8 @@ class CaseMemory:
     def episodic_context(self) -> str:
         return self.episodic.episodic_context()
 
-    def retrieve_context(self, node: Node, query: str, *, k: int = 5) -> str:
+    def retrieve_context(self, node: Node, query: str, *, k: int | None = None) -> str:
+        k = self.memory_k if k is None else k
         parts = []
         ep = self.episodic_context()
         if ep:
@@ -58,5 +65,5 @@ class CaseMemory:
         return "\n\n".join(parts)
 
     @classmethod
-    def from_config(cls, memory_method: str = "flat") -> CaseMemory:
-        return cls(semantic=get_semantic_memory(memory_method))
+    def from_config(cls, memory_method: str = "flat", *, memory_k: int = 5) -> CaseMemory:
+        return cls(semantic=get_semantic_memory(memory_method), memory_k=memory_k)

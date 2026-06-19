@@ -14,7 +14,7 @@ from baselines.agent_runner import (
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Phase 1 graph traversal (skip report node).")
+    parser = argparse.ArgumentParser(description="Full graph traversal + Qwen report → cot_chain.json.")
     parser.add_argument("--slide-id", required=True, help="Slide filename e.g. CASE.svs")
     parser.add_argument("--backend", choices=["dummy", "qwen"], default="qwen")
     parser.add_argument("--memory", default="flat")
@@ -33,7 +33,7 @@ def main() -> None:
         retriever=args.retriever,
         navigator=args.navigator,
         slide_id=args.slide_id,
-        skip_report_nodes=True,
+        skip_report_nodes=False,
         search_all_patches=args.search_all_patches,
     )
 

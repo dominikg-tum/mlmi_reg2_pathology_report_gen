@@ -5,7 +5,6 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:0
-#SBATCH --cpus-per-task=4
 #SBATCH --time=08:00:00
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/build_chains_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/build_chains_%j.err
@@ -24,8 +23,15 @@ mkdir -p "${LOGS_DIR}"
 LIMIT="${LIMIT:-0}"
 SLIDE="${SLIDE:-}"
 RESUME="${RESUME:-}"
+RETRY_FAILED="${RETRY_FAILED:-}"
+# Remote vLLM (when not colocated on same node), e.g.:
+#   VLLM_HOST=heidelberg.garching.camp.cluster RESUME=1 sbatch scripts/cluster/build_chains.sh
+VLLM_HOST="${VLLM_HOST:-localhost}"
+export QWEN_API_BASE_URL="${QWEN_API_BASE_URL:-http://${VLLM_HOST}:8000/v1}"
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
+  --env QWEN_API_BASE_URL="${QWEN_API_BASE_URL}" \
+  --env QWEN_MODEL_NAME="${QWEN_MODEL_NAME:-}" \
   "${CONTAINER}" \
   bash -lc "
     set -euo pipefail
@@ -35,5 +41,6 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
     [[ -n '${SLIDE}' ]] && ARGS+=(--slide '${SLIDE}')
     [[ '${LIMIT}' != '0' ]] && ARGS+=(--limit '${LIMIT}')
     [[ -n '${RESUME}' ]] && ARGS+=(--resume)
+    [[ -n '${RETRY_FAILED}' ]] && ARGS+=(--retry-failed)
     \"\${ARGS[@]}\"
   "

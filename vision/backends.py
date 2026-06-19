@@ -50,9 +50,9 @@ def get_visual_provider(
 
         return NoneVisualProvider()
     if method == "patch_retrieve":
-        from vision.thumbnail import PatchRetrieveProvider
+        from vision.graph_visual import GraphPolicyVisualProvider
 
-        return PatchRetrieveProvider(
+        return GraphPolicyVisualProvider(
             cache_root, wsi_path=wsi_path, wsi_data_dir=wsi_data_dir
         )
     if method == "slide_embed":

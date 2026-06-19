@@ -79,7 +79,8 @@ class ZeroShotQwenBackend:
             if node.options:
                 extra_body["guided_choice"] = node.options
 
-        resp = self.client.chat.completions.create(
+        resp = _chat_with_retry(
+            self.client,
             model=self.model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -93,6 +94,22 @@ class ZeroShotQwenBackend:
         answer = (choice.message.content or "").strip()
         confidence = _first_token_prob(choice)
         return answer, confidence
+
+
+def _chat_with_retry(client, **kwargs):
+    import time
+
+    last_err = None
+    for attempt in range(4):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            last_err = exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status not in (429, 500, 502, 503, 504) or attempt == 3:
+                raise
+            time.sleep(2 ** attempt)
+    raise last_err
 
 
 def _visual_prompt_note(visual: VisualBundle | None) -> str:
@@ -121,7 +138,8 @@ def _visual_image_paths(visual: VisualBundle | None) -> list:
     paths = []
     if visual.thumbnail_path:
         paths.append(visual.thumbnail_path)
-    paths.extend(visual.patch_paths)
+    patch_limit = 2 if visual.thumbnail_path else 5
+    paths.extend(visual.patch_paths[:patch_limit])
     return paths
 
 

@@ -7,6 +7,7 @@
 | [cluster_setup.md](cluster_setup.md) | Garching SLURM, enroot, local VLM + vLLM (WP3) |
 | [WSI_Patching_Retrieval_Research.md](WSI_Patching_Retrieval_Research.md) | Patch retrieval methods & zoom routing |
 | [WSI_Background_Filtering.md](WSI_Background_Filtering.md) | Tissue vs glass filtering (offline tiling) |
+| [MULTI_SLIDE_CASES.md](MULTI_SLIDE_CASES.md) | Cervix+corpus / IHC cases — case vs slide routing for Phase 1 |
 | [../README.md](../README.md) | Repo tree, quick start, owner lanes |
 
 ---
@@ -25,7 +26,7 @@ Build a system that, **given only a WSI at test time**, walks a **diagnostic gra
 | Input | WSI + report | **WSI only** |
 | Report | Supervision (WP3 chains) + HippoRAG 2 index (train split only) | **Not available** |
 
-**WSI data:** `.svs` files under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` (~220 slides). Canonical path in [`configs/paths.yaml`](../configs/paths.yaml) → `cluster.data_dir`.
+**WSI data:** `.svs` files under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` (~220 slides). Canonical path in [`configs/paths.yaml`](../configs/paths.yaml) → `cluster.data_dir`. Many **cases** use 2–3 slides (fractional curettage: cervix + corpus ± IHC block); labels and CoT are **case-level** — see [MULTI_SLIDE_CASES.md](MULTI_SLIDE_CASES.md).
 
 **Cluster-only assets** (not on local laptops — see [cluster_setup.md](cluster_setup.md)):
 

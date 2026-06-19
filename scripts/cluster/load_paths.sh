@@ -98,6 +98,7 @@ def emit(key, value):
 
 emit("PROJECT_ROOT", c["project_root"])
 emit("REPO", r["path"])
+emit("WORK_DIR", u["work_dir"])
 emit("CONTAINER", u["container_sqsh"])
 emit("LOGS_DIR", u["logs_dir"])
 emit("MODEL", q["model_path"])

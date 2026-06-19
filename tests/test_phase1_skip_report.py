@@ -24,3 +24,15 @@ def test_chain_to_dict_omits_report_when_requested():
     assert out["report"] == ""
     assert out["node_path"] == [s.node_id for s in steps]
     assert "node_id" in out["chain-of-thought"][0]
+
+
+def test_full_traversal_includes_report_separate_from_chain():
+    steps = traverse(DummyBackend(), skip_report_nodes=False)
+    assert steps
+    assert steps[-1].node_id == "report"
+    out = chain_to_dict(steps, slide_id="CASE.svs")
+    assert out["report"] == "Sample pathology report."
+    assert out["node_path"][-1] == "diagnosis"
+    assert "report" not in out["node_path"]
+    assert all(item["node_id"] != "report" for item in out["chain-of-thought"])
+    assert out["chain-of-thought"][-1]["node_id"] == "diagnosis"

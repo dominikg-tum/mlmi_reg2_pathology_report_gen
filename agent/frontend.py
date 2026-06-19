@@ -222,7 +222,7 @@ def run_phase1(
         slide_id=slide_id,
         cache_root=cache_root,
         wsi_data_dir=wsi_data_dir,
-        skip_report_nodes=True,
+        skip_report_nodes=False,
         search_all_patches=search_all_patches,
     )
     output_root = resolve_shared_path(runs_dir or default_runs_dir())
