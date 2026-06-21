@@ -1,5 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-patch-retrieve-baseline
+#
+# Prerequisite: long-running Qwen vLLM server (NOT started by this script).
+#   sbatch scripts/cluster/start_qwen_server.sh
+#   squeue -u $USER   # note the node name, e.g. heidelberg
+#   curl -s http://<node>:8000/v1/models | head
+# Then submit with matching API base (default assumes heidelberg):
+#   QWEN_API_BASE=http://heidelberg:8000/v1 SEARCH_ALL_PATCHES=1 FORCE=1 sbatch scripts/cluster/run_patch_retrieve_baseline.sh
 #SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --export=ALL
 #SBATCH --partition=24g
@@ -15,6 +22,8 @@ BACKEND="${BACKEND:-qwen}"
 LIMIT="${LIMIT:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 SMOKE="${SMOKE:-0}"
+SEARCH_ALL_PATCHES="${SEARCH_ALL_PATCHES:-0}"
+FORCE="${FORCE:-0}"
 QWEN_API_BASE="${QWEN_API_BASE:-http://heidelberg:8000/v1}"
 DEPENDENCY="${DEPENDENCY:-}"
 
@@ -28,6 +37,9 @@ if [[ "${SMOKE}" == "1" ]]; then
   RUNS_SUBDIR="baseline_patch_retrieve_smoke"
   PRED_NAME="predictions_test_patch_retrieve_smoke.jsonl"
   LIMIT="${LIMIT:-3}"
+elif [[ "${SEARCH_ALL_PATCHES}" == "1" ]]; then
+  RUNS_SUBDIR="baseline_patch_retrieve_fullpool"
+  PRED_NAME="predictions_test_baseline_patch_retrieve_fullpool.jsonl"
 else
   RUNS_SUBDIR="baseline_patch_retrieve"
   PRED_NAME="predictions_test_baseline_patch_retrieve.jsonl"
@@ -46,8 +58,15 @@ CMD=(
   --runs-subdir "${RUNS_SUBDIR}"
   --predictions "${WORK_DIR}/runs/${PRED_NAME}"
   --require-embeddings
-  --skip-existing
 )
+if [[ "${SEARCH_ALL_PATCHES}" == "1" ]]; then
+  CMD+=(--search-all-patches)
+fi
+if [[ "${FORCE}" == "1" ]]; then
+  CMD+=(--force)
+else
+  CMD+=(--skip-existing)
+fi
 if [[ "${LIMIT}" != "0" ]]; then
   CMD+=(--limit "${LIMIT}")
 fi

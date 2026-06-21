@@ -92,6 +92,14 @@ def main() -> None:
         action="store_true",
         help="Skip cases whose primary WSI lacks patch_embeddings_20x.pt under cache_root",
     )
+    parser.add_argument(
+        "--search-all-patches",
+        action="store_true",
+        help=(
+            "Search the full patch embedding pool at retrieval time instead of k-means centroids "
+            "(configs/vision.yaml retrieval.kmeans_k). Use for patch_retrieve ablations."
+        ),
+    )
     args = parser.parse_args()
     _apply_baseline(args)
 
@@ -147,6 +155,7 @@ def main() -> None:
         f"Baseline={label!r} split={args.split!r}: {len(cases)} ok chains, "
         f"{len(planned)} runnable, {len(skipped_no_thumb)} missing WSI+thumbnail, "
         f"{len(skipped_no_emb)} missing patch embeddings"
+        + (", search_all_patches=True" if args.search_all_patches else "")
     )
     print(f"Output: {runs_dir}")
     if wsi_only:
@@ -192,6 +201,7 @@ def main() -> None:
             slide_id=case_id,
             wsi_slide_id=wsi_id,
             skip_report_nodes=False,
+            search_all_patches=args.search_all_patches,
         )
         write_run_outputs(result, runs_dir, case_id)
         completed.append(case_id)

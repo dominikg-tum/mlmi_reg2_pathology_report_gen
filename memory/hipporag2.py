@@ -8,7 +8,15 @@ from pathlib import Path
 
 import numpy as np
 
-from graph.schema import Node
+from graph.schema import Node, NodeKind, Tier
+
+# B1 v2: semantic memory only at integration MCQ nodes — not early vision routing.
+_INTEGRATION_MEMORY_NODE_KINDS = frozenset({NodeKind.INTEGRATION})
+
+
+def memory_retrieval_enabled(node: Node) -> bool:
+    """Return True when HippoRAG may inject train CoT context at this graph node."""
+    return node.tier == Tier.INTEGRATION and node.node_kind in _INTEGRATION_MEMORY_NODE_KINDS
 
 
 @dataclass
@@ -81,22 +89,49 @@ class HippoRAG2Memory:
             for item in data.get("steps", [])
         ]
 
+    def _rank_steps(
+        self,
+        candidates: list[_IndexedStep],
+        node: Node,
+        query: str,
+        *,
+        k: int,
+    ) -> list[tuple[float, _IndexedStep]]:
+        self._ensure_model()
+        q_emb = np.asarray(self._model.encode(f"{node.id} {query}"), dtype=np.float32)
+        sims: list[tuple[float, _IndexedStep]] = []
+        for step in candidates:
+            denom = np.linalg.norm(q_emb) * np.linalg.norm(step.embedding) + 1e-8
+            sim = float(np.dot(q_emb, step.embedding) / denom)
+            sims.append((sim, step))
+        sims.sort(key=lambda x: -x[0])
+        return sims[:k]
+
     def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
+        if not memory_retrieval_enabled(node):
+            return ""
+
         if not self._steps:
             if self.index_path and self.index_path.exists():
                 self.load_index(self.index_path)
             else:
                 return ""
 
-        self._ensure_model()
-        q_emb = np.asarray(self._model.encode(f"{node.id} {query}"), dtype=np.float32)
-        sims = []
-        for step in self._steps:
-            denom = np.linalg.norm(q_emb) * np.linalg.norm(step.embedding) + 1e-8
-            sim = float(np.dot(q_emb, step.embedding) / denom)
-            sims.append((sim, step))
-        sims.sort(key=lambda x: -x[0])
-        top = sims[:k]
+        # Node-aware pool: only retrieve CoT steps from the same graph node so early
+        # routing (e.g. compartment) is not hijacked by mass-lesion steps elsewhere.
+        node_pool = [s for s in self._steps if s.node_id == node.id]
+        top = self._rank_steps(node_pool, node, query, k=k) if node_pool else []
+        if len(top) < k:
+            seen = {s.text for _, s in top}
+            global_extra = self._rank_steps(self._steps, node, query, k=k + len(seen))
+            for sim, step in global_extra:
+                if step.text in seen:
+                    continue
+                top.append((sim, step))
+                seen.add(step.text)
+                if len(top) >= k:
+                    break
+
         if not top:
             return ""
         lines = [f"- {s.text} (sim={sim:.3f})" for sim, s in top]

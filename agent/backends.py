@@ -20,6 +20,25 @@ SYSTEM_PROMPT = (
     "and no explanation."
 )
 
+REPORT_SYSTEM_PROMPT = (
+    "You are a board-certified gynecologic pathologist drafting a final uterine "
+    "pathology report from visual evidence and prior diagnostic answers. Write in "
+    "formal narrative prose similar to a clinical pathology report: macroscopic and "
+    "microscopic findings in complete sentences, then a clear diagnostic impression. "
+    "Target roughly 700–800 characters when the case allows; shorter is acceptable "
+    "for simple or largely unremarkable specimens. Do not use pipe-separated fields, "
+    "bullet templates, or answer keys. Do not mention the reasoning graph."
+)
+
+REPORT_USER_INSTRUCTION = (
+    "Draft the final pathology report as continuous narrative prose (not a template). "
+    "Include, when supported by the evidence: specimen/procedure, macroscopic "
+    "description, microscopic findings by compartment, and a diagnostic impression "
+    "with key qualifiers (e.g. benign vs malignant, histologic type, grade, phase). "
+    "Aim for about 700–800 characters for typical cases; be shorter if findings are "
+    "minimal. Use professional pathology language only."
+)
+
 
 class AnswerBackend(Protocol):
     def answer(
@@ -60,12 +79,7 @@ class ZeroShotQwenBackend:
                 "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
             )
         if node.node_kind == NodeKind.REPORT:
-            prompt_parts.append(
-                "Combine the visual findings and all prior diagnostic answers into a "
-                "concise final pathology report. State the specimen/procedure when "
-                "supported, followed by the principal diagnosis and key qualifiers. "
-                "Do not mention the reasoning process or answer keys."
-            )
+            prompt_parts.append(REPORT_USER_INSTRUCTION)
         elif node.interaction == InteractionType.FREE_TEXT:
             prompt_parts.append("Return a concise pathology answer.")
         else:
@@ -79,11 +93,12 @@ class ZeroShotQwenBackend:
             if node.options:
                 extra_body["guided_choice"] = node.options
 
+        system_prompt = REPORT_SYSTEM_PROMPT if node.node_kind == NodeKind.REPORT else SYSTEM_PROMPT
         resp = _chat_with_retry(
             self.client,
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},
             ],
             temperature=0.0,
