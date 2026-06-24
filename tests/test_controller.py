@@ -90,7 +90,13 @@ def test_qwen_backend_sends_choices_and_images(tmp_path):
 
     answer, _ = backend.answer(
         node,
-        VisualBundle(patch_paths=[image], metadata={"visual": "patch_retrieve"}),
+        VisualBundle(
+            patch_paths=[image],
+            metadata={
+                "visual": "patch_retrieve",
+                "embedding_context": "UNI2 level 10x first_2=[0.1, 0.2]",
+            },
+        ),
         [],
     )
 
@@ -99,6 +105,9 @@ def test_qwen_backend_sends_choices_and_images(tmp_path):
     assert call["extra_body"]["guided_choice"] == node.options
     assert call["messages"][0]["role"] == "system"
     assert isinstance(call["messages"][1]["content"], list)
+    prompt_text = call["messages"][1]["content"][-1]["text"]
+    assert "Embedding features:" in prompt_text
+    assert "UNI2 level 10x" in prompt_text
 
 
 def test_fixed_visual_bundle_bypasses_retrieval(tmp_path):

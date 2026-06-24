@@ -233,6 +233,14 @@ streamlit run app.py
 # upload one image, select a remote OpenAI-compatible VLM, run the full graph.
 # No TITAN, WSI cache, or patch embeddings are loaded.
 
+# UNI2 WSI embeddings + optional patch PNG export
+python -m scripts.vision.encode_uni2_wsi \
+  --slide TUM_Uterus_0001.svs \
+  --level 1.25x --level 2.5x --level 5x --level 10x \
+  --repo-path /Volumes/Xun/UNI \
+  --save-patch-images \
+  --max-patches 128
+
 # P1 agent — thumbnail, no TITAN
 python -m baselines.run_agent --backend dummy --memory flat --visual thumbnail
 

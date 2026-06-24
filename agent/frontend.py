@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit, urlunsplit
 
 from agent.backends import AnswerBackend, ZeroShotQwenBackend
 from agent.controller import chain_to_dict, traverse
@@ -32,6 +33,26 @@ class SlideOption:
     has_existing_chain: bool
 
 
+def normalize_openai_base_url(base_url: str) -> str:
+    """Return an OpenAI-compatible API root ending in /v1."""
+    raw = (base_url or "").strip().rstrip("/")
+    if not raw:
+        raise ValueError("VLM endpoint is empty")
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    parsed = urlsplit(raw)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/v1"):
+        normalized_path = path
+    elif path:
+        normalized_path = f"{path}/v1"
+    else:
+        normalized_path = "/v1"
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, normalized_path, parsed.query, parsed.fragment)
+    )
+
+
 def safe_upload_name(filename: str) -> str:
     stem = Path(filename or "uploaded_image.png").stem
     suffix = Path(filename or "uploaded_image.png").suffix.lower()
@@ -53,11 +74,12 @@ def run_fixed_image_chain(
     *,
     backend: AnswerBackend,
     image_id: str | None = None,
+    embedding_context: str = "",
 ) -> dict[str, Any]:
     """Run the full graph with one uploaded image attached to every VLM question."""
     visual = VisualBundle(
         thumbnail_path=image_path,
-        metadata={"visual": "uploaded_image"},
+        metadata={"visual": "uploaded_image", "embedding_context": embedding_context},
     )
     steps = traverse(
         backend,
@@ -80,15 +102,25 @@ def run_remote_image_chain(
     base_url: str,
     model_name: str,
     api_key: str = "EMPTY",
+    embedding_context: str = "",
 ) -> dict[str, Any]:
     import openai
 
-    client = openai.OpenAI(base_url=base_url.rstrip("/"), api_key=api_key)
-    backend = ZeroShotQwenBackend(client, model_name)
+    client = openai.OpenAI(
+        base_url=normalize_openai_base_url(base_url),
+        api_key=api_key,
+    )
+    backend = ZeroShotQwenBackend(
+        client,
+        model_name,
+        use_guided_choice=False,
+        request_logprobs=False,
+    )
     return run_fixed_image_chain(
         image_path,
         backend=backend,
         image_id=image_path.name,
+        embedding_context=embedding_context,
     )
 
 
@@ -103,6 +135,79 @@ def save_baseline_result(
     path = run_dir / "cot_chain.json"
     path.write_text(json.dumps(chain, indent=2) + "\n")
     return path
+
+
+def load_uni2_summary(cache_root: Path, slide_id: str) -> dict[str, Any] | None:
+    from vision.cache import slide_cache_dir
+
+    path = slide_cache_dir(cache_root, slide_id) / "uni2_summary.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def build_uni2_embedding_context(
+    summary: dict[str, Any],
+    *,
+    max_dims_per_level: int = 24,
+) -> str:
+    """Load UNI2 slide embeddings and format a compact text context for a VLM."""
+    import numpy as np
+    import torch
+
+    lines = [
+        "UNI2 WSI embedding context is attached as numeric text features.",
+        "Treat these as auxiliary global slide features; use the image evidence for visual verification.",
+        f"Slide ID: {summary.get('slide_id', '')}",
+    ]
+    for item in summary.get("levels", []):
+        level = str(item.get("level", ""))
+        path = Path(str(item.get("slide_embedding_path", "")))
+        n_patches = int(item.get("n_patches", 0) or 0)
+        expected_dim = int(item.get("embedding_dim", 0) or 0)
+        if not path.exists():
+            lines.append(
+                f"- {level}: embedding file missing; n_patches={n_patches}; dim={expected_dim}"
+            )
+            continue
+        tensor = torch.load(path, map_location="cpu", weights_only=False)
+        values = np.asarray(tensor, dtype=np.float32).reshape(-1)
+        if values.size == 0:
+            lines.append(f"- {level}: empty embedding; n_patches={n_patches}")
+            continue
+        dim = int(values.size)
+        prefix = ", ".join(f"{float(v):.4f}" for v in values[:max_dims_per_level])
+        lines.append(
+            f"- {level}: n_patches={n_patches}; dim={dim}; "
+            f"mean={float(values.mean()):.4f}; std={float(values.std()):.4f}; "
+            f"min={float(values.min()):.4f}; max={float(values.max()):.4f}; "
+            f"l2={float(np.linalg.norm(values)):.4f}; "
+            f"first_{min(max_dims_per_level, dim)}=[{prefix}]"
+        )
+    return "\n".join(lines)
+
+
+def run_uni2_embedding(
+    *,
+    svs_path: Path,
+    cache_root: Path,
+    repo_path: Path,
+    levels: list[str],
+    max_patches: int,
+    save_patch_images: bool,
+) -> dict[str, Any]:
+    from scripts.vision.encode_uni2_wsi import encode_slide_with_uni2
+    from vision.encoders.uni2 import UNI2Encoder
+
+    encoder = UNI2Encoder(repo_path=repo_path)
+    return encode_slide_with_uni2(
+        svs_path=svs_path,
+        cache_root=cache_root,
+        encoder=encoder,
+        levels=levels,
+        max_patches=max_patches,
+        save_patch_images=save_patch_images,
+    )
 
 
 def resolve_shared_path(path: Path) -> Path:

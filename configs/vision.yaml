@@ -1,10 +1,10 @@
 # Offline WSI caches — matches cluster user.cache_dir in configs/paths.yaml
 cache_root: /mnt/projects/mlmi/reg2/dominik/cache
 
-# ENCODER CONSTRAINT (locked): CONCHv1.5 via MahmoodLab/TITAN return_conch() only.
-# Requires paired text encoder for question-conditioned cosine sim retrieval.
-# Do NOT switch to UNI2-h (vision-only). No KRONOS/SEAL (wrong modality).
-# ABMIL fallback: not implemented — question-blind; see retrieval.abmil_fallback.
+# Retrieval encoder constraint (locked): CONCHv1.5 via MahmoodLab/TITAN
+# return_conch() only, because graph-guided retrieval needs paired text/image
+# embeddings. UNI2-h below is a separate vision-only WSI embedding baseline.
+# No KRONOS/SEAL for retrieval (wrong modality). ABMIL fallback is reserved.
 
 thumbnail:
   max_edge_px: 1024
@@ -69,3 +69,18 @@ titan:
   # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — use container torch; see load_paths.sh
   max_patches_per_slide: 512
   batch_size: 16
+
+uni2:
+  repo_path: /Volumes/Xun/UNI
+  model_name: uni2-h
+  # UNI2 sees 224x224 image inputs. The objective controls how much tissue area
+  # each patch covers in level-0 coordinates.
+  levels:
+    - 1.25x
+    - 2.5x
+    - 5x
+    - 10x
+  patch_size: 224
+  batch_size: 16
+  max_patches_per_level: 0  # 0 = no cap
+  save_patch_images: false

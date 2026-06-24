@@ -8,7 +8,15 @@ from typing import Iterator
 import numpy as np
 
 # Approximate microns-per-pixel at common objectives (fallback when mpp-x missing).
-_MPP_BY_OBJECTIVE = {"5x": 2.0, "4x": 2.5, "10x": 1.0, "20x": 0.5, "40x": 0.25}
+_MPP_BY_OBJECTIVE = {
+    "1.25x": 8.0,
+    "2.5x": 4.0,
+    "5x": 2.0,
+    "4x": 2.5,
+    "10x": 1.0,
+    "20x": 0.5,
+    "40x": 0.25,
+}
 
 
 def slide_id_from_path(svs_path: Path) -> str:
@@ -47,7 +55,9 @@ def resolve_wsi_files(
 def _target_mpp(objective: str) -> float:
     key = objective.lower().replace("×", "x").strip()
     if key not in _MPP_BY_OBJECTIVE:
-        raise ValueError(f"Unknown objective {objective!r}; use one of {list(_MPP_BY_OBJECTIVE)}")
+        raise ValueError(
+            f"Unknown objective {objective!r}; use one of {list(_MPP_BY_OBJECTIVE)}"
+        )
     return _MPP_BY_OBJECTIVE[key]
 
 

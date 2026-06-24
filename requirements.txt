@@ -21,3 +21,8 @@ pillow>=10.0
 # rouge-score
 # sacrebleu
 # sentence-transformers
+
+# UNI2 WSI embedding jobs
+# torch
+# torchvision
+# timm

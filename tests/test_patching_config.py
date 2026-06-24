@@ -33,6 +33,14 @@ def test_retrieval_encode_levels():
     assert rcfg["d_min_20x_px"] == 512
 
 
+def test_uni2_config_levels():
+    from vision.mag_config import load_vision_config
+
+    cfg = load_vision_config()["uni2"]
+    assert cfg["levels"] == ["1.25x", "2.5x", "5x", "10x"]
+    assert cfg["patch_size"] == 224
+
+
 def test_adjacent_scale_parent_map():
     assert parent_zoom_for("40x") == "20x"
     assert parent_zoom_for("20x") == "10x"

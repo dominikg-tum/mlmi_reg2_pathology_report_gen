@@ -33,9 +33,18 @@ class AnswerBackend(Protocol):
 
 
 class ZeroShotQwenBackend:
-    def __init__(self, client: Any, model: str):
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        *,
+        use_guided_choice: bool = True,
+        request_logprobs: bool = True,
+    ):
         self.client = client
         self.model = model
+        self.use_guided_choice = use_guided_choice
+        self.request_logprobs = request_logprobs
 
     def answer(
         self,
@@ -48,6 +57,9 @@ class ZeroShotQwenBackend:
         history = "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in memory)
         visual_note = _visual_prompt_note(visual)
         prompt_parts = [f"Visual evidence:{visual_note or ' none attached.'}"]
+        embedding_context = _visual_embedding_context(visual)
+        if embedding_context:
+            prompt_parts.append(f"Embedding features:\n{embedding_context}")
         if history:
             prompt_parts.append(f"Prior diagnostic answers:\n{history}")
         if extra_context:
@@ -75,23 +87,30 @@ class ZeroShotQwenBackend:
         content = build_user_content(prompt, image_paths)
 
         extra_body: dict[str, Any] = {}
-        if node.interaction in (InteractionType.SINGLE_SELECT, InteractionType.BOOLEAN):
+        if (
+            self.use_guided_choice
+            and node.interaction in (InteractionType.SINGLE_SELECT, InteractionType.BOOLEAN)
+        ):
             if node.options:
                 extra_body["guided_choice"] = node.options
 
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
             ],
-            temperature=0.0,
-            logprobs=True,
-            extra_body=extra_body or None,
-        )
+            "temperature": 0.0,
+        }
+        if self.request_logprobs:
+            request["logprobs"] = True
+        if extra_body:
+            request["extra_body"] = extra_body
+
+        resp = self.client.chat.completions.create(**request)
         choice = resp.choices[0]
         answer = (choice.message.content or "").strip()
-        confidence = _first_token_prob(choice)
+        confidence = _first_token_prob(choice) if self.request_logprobs else 1.0
         return answer, confidence
 
 
@@ -123,6 +142,12 @@ def _visual_image_paths(visual: VisualBundle | None) -> list:
         paths.append(visual.thumbnail_path)
     paths.extend(visual.patch_paths)
     return paths
+
+
+def _visual_embedding_context(visual: VisualBundle | None) -> str:
+    if visual is None:
+        return ""
+    return str(visual.metadata.get("embedding_context", "")).strip()
 
 
 def _first_token_prob(choice) -> float:
