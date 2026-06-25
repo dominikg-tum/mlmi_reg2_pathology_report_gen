@@ -27,6 +27,7 @@ from vision.wsi_io import slide_id_from_path
 REPO_ROOT = Path(__file__).resolve().parent
 RUNS_DIR = REPO_ROOT / "runs" / "image_baseline"
 UPLOADS_DIR = RUNS_DIR / "uploads"
+LESION_UPLOADS_DIR = RUNS_DIR / "lesion_patches"
 UNI2_LEVELS = ("1.25x", "2.5x", "5x", "10x")
 
 
@@ -189,6 +190,7 @@ def main() -> None:
     with input_col:
         st.subheader("Input")
         uploaded = None
+        lesion_uploads = []
         wsi_path_text = ""
         selected_levels = list(UNI2_LEVELS)
         max_patches = int(uni_cfg.get("max_patches_per_level", 128) or 128)
@@ -205,6 +207,11 @@ def main() -> None:
             wsi_path_text = st.text_input(
                 "WSI path",
                 placeholder="/path/to/TUM_Uterus_0001.svs",
+            )
+            lesion_uploads = st.file_uploader(
+                "Provided lesion patch image(s)",
+                type=["png", "jpg", "jpeg", "webp"],
+                accept_multiple_files=True,
             )
             selected_levels = st.multiselect(
                 "UNI2 magnifications",
@@ -230,7 +237,7 @@ def main() -> None:
         has_input = (
             uploaded is not None
             if embedding_method == "Thumbnail"
-            else bool(wsi_path_text.strip())
+            else bool(wsi_path_text.strip()) and bool(lesion_uploads)
         )
         run_clicked = st.button(
             "Run diagnostic chain",
@@ -258,8 +265,11 @@ def main() -> None:
                     render_uni2_summary(st, summary)
                 else:
                     st.info("No UNI2 summary exists yet for this WSI/cache root.")
+                if lesion_uploads:
+                    for item in lesion_uploads:
+                        st.image(item, caption=f"Provided lesion patch: {item.name}")
             else:
-                st.info("Enter a WSI path to generate or inspect UNI2 artifacts.")
+                st.info("Enter a WSI path and upload provided lesion patch image(s).")
 
     if run_clicked and has_input:
         try:
@@ -270,6 +280,7 @@ def main() -> None:
                     UPLOADS_DIR,
                 )
                 image_name = uploaded.name
+                input_key = safe_upload_name(image_name)
                 uni_summary = None
                 embedding_context = ""
             else:
@@ -287,7 +298,17 @@ def main() -> None:
                     )
                 image_path = Path(uni_summary["thumbnail_path"])
                 image_name = slide_id_from_path(wsi_path)
+                input_key = (
+                    safe_upload_name(image_name)
+                    + "::"
+                    + ",".join(safe_upload_name(item.name) for item in lesion_uploads)
+                )
                 embedding_context = build_uni2_embedding_context(uni_summary)
+                lesion_dir = LESION_UPLOADS_DIR / Path(image_name).stem
+                lesion_patch_paths = [
+                    save_uploaded_image(item.getvalue(), f"{index:02d}_{item.name}", lesion_dir)
+                    for index, item in enumerate(lesion_uploads)
+                ]
 
             with st.spinner("Following the diagnostic graph with the selected VLM..."):
                 if mode == "Dummy smoke test":
@@ -296,6 +317,7 @@ def main() -> None:
                         backend=DummyBackend(),
                         image_id=safe_upload_name(image_name),
                         embedding_context=embedding_context,
+                        patch_paths=lesion_patch_paths if embedding_method == "UNI2" else None,
                     )
                 else:
                     chain = run_remote_image_chain(
@@ -304,6 +326,7 @@ def main() -> None:
                         model_name=model_name,
                         api_key=api_key,
                         embedding_context=embedding_context,
+                        patch_paths=lesion_patch_paths if embedding_method == "UNI2" else None,
                     )
                 output_path = save_baseline_result(
                     chain,
@@ -311,10 +334,14 @@ def main() -> None:
                     image_name=image_name,
                 )
             st.session_state["baseline_chain"] = chain
-            st.session_state["baseline_image"] = safe_upload_name(image_name)
+            st.session_state["baseline_image"] = input_key
             st.session_state["baseline_output"] = str(output_path)
             st.session_state["uni2_summary"] = uni_summary
             st.session_state["embedding_context"] = embedding_context
+            st.session_state["lesion_patch_paths"] = [
+                str(path)
+                for path in (lesion_patch_paths if embedding_method == "UNI2" else [])
+            ]
         except Exception as exc:
             st.exception(exc)
 
@@ -322,7 +349,11 @@ def main() -> None:
         current_image = safe_upload_name(uploaded.name) if uploaded is not None else ""
     else:
         current_image = (
-            safe_upload_name(Path(wsi_path_text).name) if wsi_path_text.strip() else ""
+            safe_upload_name(Path(wsi_path_text).name)
+            + "::"
+            + ",".join(safe_upload_name(item.name) for item in lesion_uploads)
+            if wsi_path_text.strip() and lesion_uploads
+            else ""
         )
     chain = (
         st.session_state.get("baseline_chain")

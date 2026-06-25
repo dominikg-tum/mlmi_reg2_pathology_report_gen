@@ -75,10 +75,12 @@ def run_fixed_image_chain(
     backend: AnswerBackend,
     image_id: str | None = None,
     embedding_context: str = "",
+    patch_paths: list[Path] | None = None,
 ) -> dict[str, Any]:
     """Run the full graph with one uploaded image attached to every VLM question."""
     visual = VisualBundle(
         thumbnail_path=image_path,
+        patch_paths=list(patch_paths or []),
         metadata={"visual": "uploaded_image", "embedding_context": embedding_context},
     )
     steps = traverse(
@@ -103,6 +105,7 @@ def run_remote_image_chain(
     model_name: str,
     api_key: str = "EMPTY",
     embedding_context: str = "",
+    patch_paths: list[Path] | None = None,
 ) -> dict[str, Any]:
     import openai
 
@@ -121,6 +124,7 @@ def run_remote_image_chain(
         backend=backend,
         image_id=image_path.name,
         embedding_context=embedding_context,
+        patch_paths=patch_paths,
     )
 
 

@@ -19,6 +19,15 @@ from agent.backends import DummyBackend
 from vision.cache import slide_cache_dir
 
 
+class _CaptureVisualBackend(DummyBackend):
+    def __init__(self):
+        self.visuals = []
+
+    def answer(self, node, visual, memory, *, extra_context=""):
+        self.visuals.append(visual)
+        return super().answer(node, visual, memory, extra_context=extra_context)
+
+
 def test_load_saved_run_and_retrieval_log(tmp_path: Path):
     slide_dir = tmp_path / "CASE.svs"
     slide_dir.mkdir()
@@ -132,3 +141,22 @@ def test_fixed_image_baseline_reaches_report_without_encoder(tmp_path: Path):
     )
     assert output.exists()
     assert '"report": "Sample pathology report."' in output.read_text()
+
+
+def test_fixed_image_chain_attaches_provided_lesion_patch(tmp_path: Path):
+    image = save_uploaded_image(b"thumbnail", "case.png", tmp_path / "uploads")
+    lesion = save_uploaded_image(b"lesion", "lesion.png", tmp_path / "patches")
+    backend = _CaptureVisualBackend()
+
+    run_fixed_image_chain(
+        image,
+        backend=backend,
+        embedding_context="UNI2 context",
+        patch_paths=[lesion],
+    )
+
+    assert backend.visuals
+    visual = backend.visuals[0]
+    assert visual.thumbnail_path == image
+    assert visual.patch_paths == [lesion]
+    assert visual.metadata["embedding_context"] == "UNI2 context"

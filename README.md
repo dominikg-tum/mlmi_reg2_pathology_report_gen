@@ -12,6 +12,32 @@ Step-wise diagnostic reasoning from uterine WSIs → **reasoning chain** + **fin
 | **[docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)** | Architecture, WPs, team lanes, commands |
 | [docs/cluster_setup.md](docs/cluster_setup.md)           | Garching cluster, enroot, SLURM, vLLM   |
 
+## PathAgent lesion patch export
+
+PathAgent can be reused as a 5x lesion-patch selector through its PLIP
+text-image retrieval step. The exporter tiles each WSI at 5x, scores tissue
+patches against a lesion query, and writes the top patch(es) into the slide
+cache:
+
+```bash
+python scripts/vision/extract_pathagent_lesion_patches.py \
+  --pathagent-root /Volumes/Xun/PathAgent \
+  --plip-lib-path /path/to/plip \
+  --plip-ckpt /path/to/plip/checkpoint \
+  --data-dir /path/to/wsi_dir \
+  --cache-root /path/to/cache \
+  --top-k 1
+```
+
+Outputs land under:
+
+```text
+<cache-root>/<slide_id>/lesion_patches_5x/
+<cache-root>/<slide_id>/lesion_patches_5x.json
+```
+
+Use the exported PNG as the Streamlit UNI2 mode's provided lesion patch.
+
 
 ## Team workflow
 
