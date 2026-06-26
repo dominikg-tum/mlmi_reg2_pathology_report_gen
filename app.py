@@ -197,6 +197,11 @@ def main() -> None:
         save_patch_images = bool(uni_cfg.get("save_patch_images", False))
         cache_root = default_cache
         uni_repo_path = Path(uni_cfg.get("repo_path", "/Volumes/Xun/UNI"))
+        uni2_weights_path = (
+            Path(uni_cfg["weights_path"]).expanduser()
+            if uni_cfg.get("weights_path")
+            else None
+        )
         if embedding_method == "Thumbnail":
             uploaded = st.file_uploader(
                 "Pathology image",
@@ -224,6 +229,9 @@ def main() -> None:
             uni_repo_path = Path(
                 st.text_input("UNI repo path", value=str(uni_repo_path))
             ).expanduser()
+            weights_default = str(uni2_weights_path) if uni2_weights_path else ""
+            weights_text = st.text_input("UNI2 weights path", value=weights_default)
+            uni2_weights_path = Path(weights_text).expanduser() if weights_text.strip() else None
             max_patches = st.number_input(
                 "Max patches per level",
                 min_value=0,
@@ -292,6 +300,7 @@ def main() -> None:
                         svs_path=wsi_path,
                         cache_root=cache_root,
                         repo_path=uni_repo_path,
+                        weights_path=uni2_weights_path,
                         levels=list(selected_levels),
                         max_patches=int(max_patches),
                         save_patch_images=bool(save_patch_images),

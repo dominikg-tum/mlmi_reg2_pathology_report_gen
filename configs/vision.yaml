@@ -72,6 +72,9 @@ titan:
 
 uni2:
   repo_path: /Volumes/Xun/UNI
+  # Optional local/HPC checkpoint folder. UNI expects
+  # <parent>/uni2-h/pytorch_model.bin; set to that uni2-h folder or file.
+  weights_path: /mnt/projects/mlmi/reg2/models/UNI2-h
   model_name: uni2-h
   # UNI2 sees 224x224 image inputs. The objective controls how much tissue area
   # each patch covers in level-0 coordinates.

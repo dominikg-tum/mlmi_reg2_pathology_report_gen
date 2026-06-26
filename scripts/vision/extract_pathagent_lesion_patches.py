@@ -36,17 +36,24 @@ class PathAgentPlipScorer:
     plip_ckpt: Path
 
     def __post_init__(self) -> None:
+        self.pathagent_root = Path(self.pathagent_root).expanduser()
+        self.plip_lib_path = Path(self.plip_lib_path).expanduser()
+        self.plip_ckpt = Path(self.plip_ckpt).expanduser()
         for path in (self.pathagent_root, self.plip_lib_path):
-            path = path.expanduser()
             if not path.exists():
                 raise FileNotFoundError(path)
             path_str = str(path)
             if path_str not in sys.path:
                 sys.path.insert(0, path_str)
 
-        from plip import PLIP
+        try:
+            from plip import PLIP
 
-        self._plip = PLIP(str(self.plip_ckpt))
+            self._plip = PLIP(str(self.plip_ckpt))
+            self._backend = "pathagent_plip"
+        except ModuleNotFoundError:
+            self._plip = _TransformersPlip(self.plip_ckpt)
+            self._backend = "transformers_plip"
 
     def score(self, query: str, patch_images: list, *, batch_size: int = 16) -> np.ndarray:
         text = _as_numpy(self._plip.encode_text([query], batch_size=1))
@@ -54,6 +61,43 @@ class PathAgentPlipScorer:
         text = _l2_normalize(text)
         image = _l2_normalize(image)
         return (image @ text.T).reshape(-1)
+
+
+class _TransformersPlip:
+    """Minimal PLIP/CLIP wrapper for local Hugging Face model folders."""
+
+    def __init__(self, model_path: Path | str):
+        import torch
+        from transformers import CLIPModel, CLIPProcessor
+
+        self.model_path = str(model_path)
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.processor = CLIPProcessor.from_pretrained(self.model_path)
+        self.model = CLIPModel.from_pretrained(self.model_path).to(self.device).eval()
+
+    def encode_text(self, texts: list[str], *, batch_size: int = 1):
+        import torch
+
+        outputs = []
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start : start + batch_size]
+            inputs = self.processor(text=batch, return_tensors="pt", padding=True)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            with torch.inference_mode():
+                outputs.append(self.model.get_text_features(**inputs).detach().cpu())
+        return torch.cat(outputs, dim=0).numpy()
+
+    def encode_images(self, images: list, *, batch_size: int = 16):
+        import torch
+
+        outputs = []
+        for start in range(0, len(images), batch_size):
+            batch = [img.convert("RGB") for img in images[start : start + batch_size]]
+            inputs = self.processor(images=batch, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            with torch.inference_mode():
+                outputs.append(self.model.get_image_features(**inputs).detach().cpu())
+        return torch.cat(outputs, dim=0).numpy()
 
 
 def _as_numpy(value) -> np.ndarray:
@@ -205,6 +249,8 @@ def main() -> None:
             print(f"FAIL {slide_id_from_path(svs_path)}")
             print(traceback.format_exc())
     print(f"Done: {ok} ok, {failed} failed")
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

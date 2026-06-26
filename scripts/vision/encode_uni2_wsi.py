@@ -163,6 +163,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--wsi-index", type=int, default=None)
     parser.add_argument("--repo-path", type=Path, default=None, help="Path to cloned UNI repo")
+    parser.add_argument("--uni2-weights-path", type=Path, default=None)
     parser.add_argument("--model-name", default=None)
     parser.add_argument("--patch-size", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
@@ -177,6 +178,7 @@ def main() -> None:
     cache_root = args.cache_root or default_cache_root(vcfg)
     levels = args.level or list(uni_cfg.get("levels", DEFAULT_UNI2_LEVELS))
     repo_path = args.repo_path or Path(uni_cfg.get("repo_path", "/Volumes/Xun/UNI"))
+    weights_path = args.uni2_weights_path or uni_cfg.get("weights_path")
     model_name = args.model_name or str(uni_cfg.get("model_name", "uni2-h"))
     patch_size = args.patch_size or int(uni_cfg.get("patch_size", 224))
     batch_size = args.batch_size or int(uni_cfg.get("batch_size", 16))
@@ -196,7 +198,11 @@ def main() -> None:
     if not svs_files:
         raise SystemExit(f"No .svs files under {data_dir}")
 
-    encoder = UNI2Encoder(repo_path=repo_path, model_name=model_name)
+    encoder = UNI2Encoder(
+        repo_path=repo_path,
+        model_name=model_name,
+        weights_path=weights_path,
+    )
     ok, failed = 0, 0
     for svs_path in svs_files:
         try:
@@ -218,8 +224,9 @@ def main() -> None:
             print(f"FAIL {slide_id_from_path(svs_path)}")
             print(traceback.format_exc())
     print(f"Done: {ok} ok, {failed} failed")
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
     main()
-

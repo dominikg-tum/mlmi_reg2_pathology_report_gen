@@ -19,6 +19,34 @@ text-image retrieval step. The exporter tiles each WSI at 5x, scores tissue
 patches against a lesion query, and writes the top patch(es) into the slide
 cache:
 
+To build the full offline visual context used by the Streamlit UNI2 baseline
+in one run, use:
+
+```bash
+python scripts/vision/build_offline_visual_context.py \
+  --pathagent-root /Volumes/Xun/PathAgent \
+  --plip-lib-path /path/to/plip \
+  --plip-ckpt /path/to/plip/checkpoint \
+  --uni-repo-path /Volumes/Xun/UNI \
+  --data-dir /path/to/wsi_dir \
+  --cache-root /path/to/cache \
+  --lesion-top-k 1 \
+  --level 1.25x --level 2.5x --level 5x --level 10x
+```
+
+On the cluster, submit the wrapper after setting PLIP paths:
+
+```bash
+export PLIP_LIB_PATH=/mnt/projects/mlmi/reg2/repos/plip
+export PLIP_CKPT=/mnt/projects/mlmi/reg2/models/plip
+export PATHAGENT_ROOT=/mnt/projects/mlmi/reg2/repos/PathAgent
+export UNI_REPO_PATH=/mnt/projects/mlmi/reg2/repos/UNI
+
+sbatch --array=0-459 scripts/cluster/build_offline_visual_context.sh \
+  --lesion-max-candidates 512 \
+  --lesion-top-k 1
+```
+
 ```bash
 python scripts/vision/extract_pathagent_lesion_patches.py \
   --pathagent-root /Volumes/Xun/PathAgent \

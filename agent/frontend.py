@@ -196,6 +196,7 @@ def run_uni2_embedding(
     svs_path: Path,
     cache_root: Path,
     repo_path: Path,
+    weights_path: Path | None = None,
     levels: list[str],
     max_patches: int,
     save_patch_images: bool,
@@ -203,7 +204,7 @@ def run_uni2_embedding(
     from scripts.vision.encode_uni2_wsi import encode_slide_with_uni2
     from vision.encoders.uni2 import UNI2Encoder
 
-    encoder = UNI2Encoder(repo_path=repo_path)
+    encoder = UNI2Encoder(repo_path=repo_path, weights_path=weights_path)
     return encode_slide_with_uni2(
         svs_path=svs_path,
         cache_root=cache_root,

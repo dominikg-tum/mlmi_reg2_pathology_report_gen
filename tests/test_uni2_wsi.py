@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from scripts.vision import encode_uni2_wsi
-from vision.encoders.uni2 import mean_pool_embeddings
+from vision.encoders.uni2 import _resolve_assets_dir, mean_pool_embeddings
 from vision.wsi_io import objective_downsample
 
 
@@ -40,6 +40,25 @@ def test_mean_pool_embeddings():
     np.testing.assert_allclose(mean_pool_embeddings(emb), np.asarray([2, 3, 4], dtype=np.float32))
 
 
+def test_resolve_uni2_assets_dir(tmp_path: Path):
+    weights_dir = tmp_path / "uni2-h"
+    weights_dir.mkdir()
+    ckpt = weights_dir / "pytorch_model.bin"
+    ckpt.write_bytes(b"weights")
+
+    assert _resolve_assets_dir(weights_dir, "uni2-h") == tmp_path
+    assert _resolve_assets_dir(ckpt, "uni2-h") == tmp_path
+    assert _resolve_assets_dir(tmp_path, "uni2-h") == tmp_path
+
+    upper_parent = tmp_path / "upper"
+    upper_parent.mkdir()
+    upper_dir = upper_parent / "UNI2-h"
+    upper_dir.mkdir()
+    (upper_dir / "pytorch_model.bin").write_bytes(b"weights")
+    assets_dir = _resolve_assets_dir(upper_dir, "uni2-h")
+    assert (assets_dir / "uni2-h" / "pytorch_model.bin").exists()
+
+
 def test_encode_slide_with_uni2_writes_artifacts(monkeypatch, tmp_path: Path):
     svs = tmp_path / "case.svs"
     svs.write_text("not a real slide")
@@ -74,4 +93,3 @@ def test_encode_slide_with_uni2_writes_artifacts(monkeypatch, tmp_path: Path):
     assert (out_dir / "patches" / "1p25x" / "patch_000000.png").exists()
     assert summary["levels"][0]["n_patches"] == 2
     assert summary["levels"][0]["embedding_dim"] == 3
-
