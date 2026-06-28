@@ -26,6 +26,15 @@ from vision.cache import SlideCache, build_slide_cache, slide_id_to_stem
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# Canonical multi-slide → primary-WSI routing lives in data/case_slides.py, but that
+# module is gitignored (data/*) and absent from fresh clones. Import it when present
+# (shared cluster repo) for exact train/serve parity; otherwise fall back to the
+# self-contained reimplementation below, which matches tests/test_case_slides.py.
+try:  # pragma: no cover - depends on untracked file being present
+    from data.case_slides import primary_wsi_for_baseline as _PRIMARY_WSI_FN
+except Exception:  # ModuleNotFoundError in pinned clones
+    _PRIMARY_WSI_FN = None
+
 
 @dataclass
 class ChainSample:
@@ -51,6 +60,43 @@ def _iter_chain_records(chains_path: Path):
 def _episodic_context(prior_steps: list[Step]) -> str:
     """Match ZeroShotQwenBackend's prior-answer block (Q/A history)."""
     return "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in prior_steps)
+
+
+# --------------------------------------------------------------------------- #
+# multi-slide case -> primary vision WSI (parity with inference baseline)
+# --------------------------------------------------------------------------- #
+def _default_wsi_map_path() -> Path:
+    return REPO_ROOT / "data" / "manifests" / "wsi_id_map.json"
+
+
+def _load_wsi_map(path: Path | None) -> dict[str, str]:
+    """Load the UUID(.svs) -> TUM_Uterus_XXXX.svs mapping; {} if file missing."""
+    path = Path(path) if path else _default_wsi_map_path()
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mapping = payload.get("mapping", payload) if isinstance(payload, dict) else {}
+    return {str(k): str(v) for k, v in mapping.items()}
+
+
+def _resolve_vision_wsi(
+    case_slide_id: str, wsi_map: dict[str, str], *, primary_index: int
+) -> str:
+    """Map a (possibly multi-slide) chains case id to the single WSI used for vision.
+
+    chains.jsonl stores the *case* id: a comma-separated list of UUID ``.svs`` names.
+    For Phase A baseline parity we pick one primary slide (default index 1 = corpus for
+    fractional curettage; clamped for shorter lists) and translate its UUID to the
+    ``TUM_Uterus_XXXX.svs`` name used by the offline cache / thumbnail bank.
+    """
+    s = str(case_slide_id)
+    if _PRIMARY_WSI_FN is not None:
+        return _PRIMARY_WSI_FN(s, index=primary_index)
+    ids = [x.strip() for x in s.split(",") if x.strip()]
+    if not ids:
+        return ""
+    chosen = ids[min(primary_index, len(ids) - 1)]
+    return wsi_map.get(chosen, chosen)
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +184,9 @@ def build_training_jsonl(
     include_report_node: bool = False,
     max_image_edge_px: int = 512,
     limit: int = 0,
+    primary_index: int = 1,
+    wsi_id_map: dict[str, str] | None = None,
+    wsi_id_map_path: Path | None = None,
     # Dependency injection (tests / custom pipelines)
     visual_provider: Any = None,
     retriever: Any = None,
@@ -152,6 +201,9 @@ def build_training_jsonl(
     output_path = Path(output_path)
     image_root = Path(image_root) if image_root else output_path.parent / "images"
 
+    if wsi_id_map is None:
+        wsi_id_map = _load_wsi_map(wsi_id_map_path)
+
     if retriever is None:
         retriever = _build_retriever(
             retriever_method, search_all_patches=search_all_patches
@@ -164,6 +216,7 @@ def build_training_jsonl(
     n_written = 0
     n_slides = 0
     n_skipped_no_visual = 0
+    n_unmapped = 0
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8") as out_f:
@@ -180,8 +233,18 @@ def build_training_jsonl(
                 break
             n_slides += 1
 
+            # chains slide_id is the *case* id (comma-separated UUID .svs). Route vision
+            # to the primary single WSI (TUM_Uterus_XXXX.svs) the offline cache uses.
+            vision_wsi = _resolve_vision_wsi(
+                slide_id, wsi_id_map, primary_index=primary_index
+            )
+            if not vision_wsi:
+                n_unmapped += 1
+
             slide_cache: SlideCache | None = (
-                build_slide_cache(cache_root, slide_id) if cache_root else None
+                build_slide_cache(cache_root, vision_wsi)
+                if (cache_root and vision_wsi)
+                else None
             )
 
             prior_steps: list[Step] = []
@@ -201,7 +264,7 @@ def build_training_jsonl(
                     visual_paths = _materialize_visuals(
                         visual_bundle,
                         image_root=image_root,
-                        slide_id=slide_id,
+                        slide_id=vision_wsi or slide_id,
                         node_id=node_id,
                         max_edge_px=max_image_edge_px,
                     )
@@ -228,7 +291,8 @@ def build_training_jsonl(
     print(
         f"Wrote {n_written} samples from {n_slides} {split} slides "
         f"-> {output_path} (images under {image_root}); "
-        f"skipped {n_skipped_no_visual} nodes with no visual evidence."
+        f"skipped {n_skipped_no_visual} nodes with no visual evidence; "
+        f"{n_unmapped} cases had no WSI-id-map entry."
     )
     return n_written
 
@@ -272,6 +336,18 @@ def main() -> None:
     parser.add_argument("--include-report-node", action="store_true")
     parser.add_argument("--max-image-edge-px", type=int, default=512)
     parser.add_argument("--limit", type=int, default=0, help="Process only N slides (0=all)")
+    parser.add_argument(
+        "--primary-index",
+        type=int,
+        default=1,
+        help="Which slide of a multi-slide case to use for vision (1=corpus, baseline default)",
+    )
+    parser.add_argument(
+        "--wsi-id-map",
+        type=Path,
+        default=None,
+        help="UUID->TUM_Uterus map JSON (default: data/manifests/wsi_id_map.json)",
+    )
     args = parser.parse_args()
 
     cache_root = args.cache_root
@@ -298,6 +374,8 @@ def main() -> None:
         include_report_node=args.include_report_node,
         max_image_edge_px=args.max_image_edge_px,
         limit=args.limit,
+        primary_index=args.primary_index,
+        wsi_id_map_path=args.wsi_id_map,
     )
 
 
