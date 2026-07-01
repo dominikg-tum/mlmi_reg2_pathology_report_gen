@@ -28,31 +28,51 @@ MAX_RETRIES = 3
 
 class HippoRAG2Memory:
     """
-    HippoRAG2 memory component
+    HippoRAG2 memory component based on https://arxiv.org/abs/2502.14802
+
+    Advanced RAG system that uses a Knowledge Graph and the Personalized PageRank (PPR)
+    algorithm to enable multi-hop reasoning over pathology reports and CoT chains.
     """
 
     def __init__(self, index_path: str | Path | None = None, mock_llm: bool = True):
+        """
+        Initializes the HippoRAG2Memory, setting up storage paths,
+        the embedding model, and the LLM client.
+        """
         self.index_path = Path(index_path) if index_path else None
+
         # Knowledge graph that contains CoT knowledge
         self.knowledge_graph = None
-
+        # Mock LLM mode for testing purposes
         self.mock_llm = mock_llm
 
+        # Initialize embedding model for vector search and synonym detection
         self.encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
 
         if not self.mock_llm:
-            cfg = load_config()
             # Load cluster LLM data
+            cfg = load_config()
             qwen_cfg = cfg.get("qwen", {})
             api_base = qwen_cfg.get("api_base_url", "http://localhost:8000/v1")
             api_key = qwen_cfg.get("api_key", "EMPTY")
-            # Create cluster LLM model
+
+            # Create cluster LLM client
             self.client = OpenAI(base_url=api_base, api_key=api_key)
             self.model_name = qwen_cfg.get("model_name", "qwen")
 
     def build_index(self, train_reports_path: str, *, split: str = "train") -> None:
         """
-        Create knowledge graph from CoT chains and LLM triplet extraction.
+        Builds the knowledge graph from CoT chains using LLM triplet extraction.
+
+        Creates a Dense-Sparse graph structure containing both extracted concepts (phrases)
+        and the original text (passages).
+
+        Args:
+            train_reports_path (str): Path to the JSONL file containing the CoT data.
+            split (str): Which dataset split to index (default: "train").
+
+        Raises:
+            FileNotFoundError: If the specified JSONL file does not exist.
         """
         path = Path(train_reports_path)
         if not path.exists():
@@ -60,20 +80,20 @@ class HippoRAG2Memory:
 
         passages = []
 
+        # Read JSONL file and extract passages from CoT chains or reports
         with path.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line: continue
                 raw = json.loads(line)
 
+                # Filter by dataset split and extraction status
                 if split and raw.get("split") != split:
                     continue
-
                 if raw.get("extraction_status", "ok") != "ok":
                     continue
 
                 slide_id = str(raw.get("slide_id", ""))
-
                 chains = raw.get("chains", [])
 
                 if not chains:
@@ -81,34 +101,39 @@ class HippoRAG2Memory:
                     if report:
                         passages.append({"id": slide_id, "text": report})
                 else:
+                    # Format CoT chains as Q&A strings
                     for i, item in enumerate(chains):
                         q = item.get("question") or item.get("q", "")
                         a = item.get("answer") or item.get("a", "")
                         text = f"Question: {q} Answer: {a}"
                         passages.append({"id": f"{slide_id}_chain_{i}", "text": text})
 
+        # Extract triples for each passage using the LLM
         all_triples = []
-        for p_idx, p in enumerate(passages):
-            triples = self._extract_triples_with_llm(p["text"])
+        for id, passage in enumerate(passages):
+            triples = self._extract_triples_with_llm(passage["text"])
             for sub, rel, obj in triples:
-                all_triples.append({"sub": sub, "rel": rel, "obj": obj, "p_idx": p_idx})
+                all_triples.append({"sub": sub, "rel": rel, "obj": obj, "p_idx": id})
 
+        # Create a unique list of all phrases (concepts) found in the triples
         phrase_list = []
-        phrase_to_idx = {}
-        for t in all_triples:
-            for ph in (t["sub"], t["obj"]):
-                if ph not in phrase_to_idx:
-                    phrase_to_idx[ph] = len(phrase_list)
-                    phrase_list.append(ph)
+        phrase_to_id = {}
+        for triple in all_triples:
+            for phrase in (triple["sub"], triple["obj"]):
+                if phrase not in phrase_to_id:
+                    phrase_to_id[phrase] = len(phrase_list)
+                    phrase_list.append(phrase)
 
         n_ph = len(phrase_list)
         n_pa = len(passages)
 
+        # Calculate embeddings and find synonyms for all phrases
         phrase_embs = self._embed(phrase_list)
         synonym_pairs = self._detect_synonyms(phrase_embs, threshold=0.8)
 
         self.phrase_embs = phrase_embs
 
+        # Prepare edges for igraph
         edges = []
         e_types = []
         e_labels = []
@@ -118,58 +143,70 @@ class HippoRAG2Memory:
             e_types.append(etype)
             e_labels.append(label)
 
+        # Add synonym edges between similar phrases
         for i, j in synonym_pairs:
             add_edge(i, j, "synonym", "synonym")
             add_edge(j, i, "synonym", "synonym")
 
-        for t in all_triples:
-            s_idx = phrase_to_idx[t["sub"]]
-            o_idx = phrase_to_idx[t["obj"]]
+        # Add relation edges between subjects and objects from the triples
+        for triple in all_triples:
+            s_idx = phrase_to_id[triple["sub"]]
+            o_idx = phrase_to_id[triple["obj"]]
             if s_idx != o_idx:
-                add_edge(s_idx, o_idx, "relation", t["rel"])
-                add_edge(o_idx, s_idx, "relation", f"inv_{t['rel']}")
-        pa_to_ph = {}
-        for t in all_triples:
-            pa_to_ph.setdefault(t["p_idx"], set()).add(phrase_to_idx[t["sub"]])
-            pa_to_ph.setdefault(t["p_idx"], set()).add(phrase_to_idx[t["obj"]])
+                add_edge(s_idx, o_idx, "relation", triple["rel"])
+                add_edge(o_idx, s_idx, "relation", f"inv_{triple['rel']}")
 
-        for p_idx, ph_set in pa_to_ph.items():
-            ig_p = n_ph + p_idx
+        # Link passages to their contained phrases (Dense-Sparse Integration)
+        pa_to_ph = {}
+        for triple in all_triples:
+            pa_to_ph.setdefault(triple["p_idx"], set()).add(phrase_to_id[triple["sub"]])
+            pa_to_ph.setdefault(triple["p_idx"], set()).add(phrase_to_id[triple["obj"]])
+
+        for id, ph_set in pa_to_ph.items():
+            ig_p = n_ph + id
             for ph_idx in ph_set:
                 add_edge(ig_p, ph_idx, "context", "contains")
                 add_edge(ph_idx, ig_p, "context", "is_in")
 
-        g = ig.Graph(n=n_ph + n_pa, directed=True)
+        # Build the igraph with all nodes and edges
+        graph = ig.Graph(n=n_ph + n_pa, directed=True)
         if edges:
-            g.add_edges(edges)
-            g.es["type"] = e_types
-            g.es["label"] = e_labels
+            graph.add_edges(edges)
+            graph.es["type"] = e_types
+            graph.es["label"] = e_labels
 
-        g.vs["type"] = ["phrase"] * n_ph + ["passage"] * n_pa
-        g.vs["text"] = phrase_list + [p["text"] for p in passages]
-        g.vs["original_id"] = [""] * n_ph + [p["id"] for p in passages]
+        # Assign types and original text/ids to nodes
+        graph.vs["type"] = ["phrase"] * n_ph + ["passage"] * n_pa
+        graph.vs["text"] = phrase_list + [p["text"] for p in passages]
+        graph.vs["original_id"] = [""] * n_ph + [p["id"] for p in passages]
 
-        self.knowledge_graph = g
+        # Bind attributes to the memory object
+        self.knowledge_graph = graph
         self.phrase_list = phrase_list
         self.passages = passages
-        self.phrase_to_idx = phrase_to_idx
+        self.phrase_to_idx = phrase_to_id
 
-        self.passage_embs = self._embed([p["text"] for p in passages])
-        self.triples = [{"sub": t["sub"], "rel": t["rel"], "obj": t["obj"]} for t in all_triples]
-        self.triple_embs = self._embed([f"{t['sub']} | {t['rel']} | {t['obj']}" for t in self.triples])
+        # Compute and cache embeddings for later retrieval
+        self.passage_embs = self._embed([passage["text"] for passage in passages])
+        self.triples = [{"sub": triple["sub"], "rel": triple["rel"], "obj": triple["obj"]} for triple in all_triples]
+        self.triple_embs = self._embed([f"{triple['sub']} | {triple['rel']} | {triple['obj']}" for triple in self.triples])
 
+        # Save the graph and metadata to disk
         if self.index_path:
             self.index_path.parent.mkdir(parents=True, exist_ok=True)
             graph_data = {
-                "n_nodes": g.vcount(),
+                "n_nodes": graph.vcount(),
                 "edges": [(e.source, e.target, e["type"], e["label"]) for e in g.es],
-                "node_types": g.vs["type"],
-                "node_texts": g.vs["text"],
-                "node_original_ids": g.vs["original_id"]
+                "node_types": graph.vs["type"],
+                "node_texts": graph.vs["text"],
+                "node_original_ids": graph.vs["original_id"]
             }
             self.index_path.write_text(json.dumps(graph_data) + "\n")
 
     def _embed(self, texts: list[str]) -> np.ndarray:
+        """
+        Helper method to create normalized dense vector embeddings for texts.
+        """
         if not texts:
             return np.zeros((0, 1), dtype=np.float32)
 
@@ -182,6 +219,9 @@ class HippoRAG2Memory:
         ).astype(np.float32)
 
     def _detect_synonyms(self, phrase_embs: np.ndarray, threshold: float = 0.8) -> list[tuple[int, int]]:
+        """
+        Compares all phrase vectors and returns pairs that exceed the similarity threshold.
+        """
         n = len(phrase_embs)
         pairs = []
         if n == 0: return pairs
@@ -253,7 +293,7 @@ class HippoRAG2Memory:
 
     def _load_index(self) -> None:
         """
-        Check if graph index is present and load it, otherwise throw error.
+        Checks if graph index is present in memory and loads it from disk if not.
         """
         if self.knowledge_graph is not None and self.knowledge_graph.vcount() > 0:
             return
@@ -265,6 +305,7 @@ class HippoRAG2Memory:
             n_nodes = data["n_nodes"]
             self.knowledge_graph = ig.Graph(n=n_nodes, directed=True)
 
+            # Reconstruct edges and nodes
             if data["edges"]:
                 self.knowledge_graph.add_edges([(e[0], e[1]) for e in data["edges"]])
                 self.knowledge_graph.es["type"] = [e[2] for e in data["edges"]]
@@ -274,6 +315,7 @@ class HippoRAG2Memory:
             self.knowledge_graph.vs["text"] = data["node_texts"]
             self.knowledge_graph.vs["original_id"] = data.get("node_original_ids", [""] * n_nodes)
 
+            # Restore class attributes for retrieval
             self.phrase_list = [t for i, t in enumerate(data["node_texts"]) if data["node_types"][i] == "phrase"]
             self.passages = [{"id": orig, "text": txt} for i, (orig, txt) in
                              enumerate(zip(self.knowledge_graph.vs["original_id"], data["node_texts"])) if
@@ -283,6 +325,10 @@ class HippoRAG2Memory:
             raise RuntimeError("RAG: Index not found. Run build_index() beforehand.")
 
     def _filter_triples_llm(self, query: str, candidates: list[tuple[dict, float]]) -> list[tuple[dict, float]]:
+        """
+        Uses the LLM to filter irrelevant triples before starting the graph search.
+        (Recognition Memory)
+        """
         if self.mock_llm:
             return candidates
 
@@ -310,6 +356,8 @@ class HippoRAG2Memory:
                     temperature=0.0,
                     max_tokens=512,
                 )
+
+                # Parse JSON string manually as format is different
                 raw = response.choices[0].message.content or ""
                 raw = raw.strip()
                 raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
@@ -332,23 +380,40 @@ class HippoRAG2Memory:
         return candidates
 
     def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
+        """
+        Retrieves most relevant context from the knowledge graph based on query.
+        Uses Personalized PageRank (PPR) over semantic triples to find reasoning paths.
+
+        Args:
+            node (Node): Current node in the diagnostic graph.
+            query (str): Raw search string from the agent.
+            k (int): Number of top passages to return.
+
+        Returns:
+            str: A formatted string concatenating the top-k retrieved passages.
+        """
+        # Load the graph and metadata into memory if not already present
         self._load_index()
 
         if self.knowledge_graph.vcount() == 0:
             return "RAG: Knowledge graph is empty."
 
+        # Convert the user query into a dense vector embedding
         q_emb = self._embed([query])[0]
 
         if len(self.triples) == 0:
             return "RAG: No triples found in graph."
 
+        # Finds the top semantic triples that best match the query
         sims = self.triple_embs @ q_emb
         top_k_triples = min(5, len(self.triples))
         top_idx = np.argsort(sims)[::-1][:top_k_triples]
         candidates = [(self.triples[i], float(sims[i])) for i in top_idx]
 
+        # Use LLM to filter out triples that are contextually irrelevant
         filtered_triples = self._filter_triples_llm(query, candidates) if candidates else []
 
+        # If no triples left, perform a standard dense vector search on the raw passages
         if not filtered_triples:
             pa_sims = self.passage_embs @ q_emb
             top_idx = np.argsort(pa_sims)[::-1][:k]
@@ -358,8 +423,10 @@ class HippoRAG2Memory:
                 results.append(f"[Source: {p['id']} | Dense-Score: {pa_sims[i]:.4f}]\n{p['text']}")
             return "\n\n---\n\n".join(results)
 
+        # Initialize base probabilities for Personalized PageRank (start at 0 for all nodes)
         p = np.zeros(self.knowledge_graph.vcount(), dtype=np.float64)
 
+        # Group and average similarities for phrase nodes based on triples
         ph_score_lists = {}
         for t, sim in filtered_triples:
             for phrase in (t["sub"], t["obj"]):
@@ -367,26 +434,31 @@ class HippoRAG2Memory:
                 if idx >= 0:
                     ph_score_lists.setdefault(idx, []).append(sim)
 
+        # Keep only top 5 highest-scoring phrase nodes as starting points for the graph search
         ranked_ph = sorted([(idx, float(np.mean(scores))) for idx, scores in ph_score_lists.items()],
                            key=lambda x: x[1], reverse=True)[:5]
         for ph_idx, score in ranked_ph:
             p[ph_idx] = score
 
+        # Assign a small baseline weight to all passage nodes based on their dense similarity to the query
         n_ph = len(self.phrase_list)
         pa_sims = self.passage_embs @ q_emb
         for pa_idx, sim in enumerate(pa_sims):
             p[n_ph + pa_idx] = float(sim) * 0.05
 
+        # Normalize the probability distribution so it sums up to exactly 1.0
         total = p.sum()
         if total > 0:
             p /= total
         else:
             p[:] = 1.0 / len(p)
 
+        # Run the personalized PageRank algorithm to spread relevance across the graph edges
         scores = self.knowledge_graph.personalized_pagerank(
             vertices=None, directed=True, damping=0.5, reset=p.tolist()
         )
 
+        # Extract final PageRank
         ranked_passages = []
         for pa_idx in range(len(self.passages)):
             ig_idx = n_ph + pa_idx
