@@ -189,14 +189,15 @@ class HippoRAG2Memory:
         # Compute and cache embeddings for later retrieval
         self.passage_embs = self._embed([passage["text"] for passage in passages])
         self.triples = [{"sub": triple["sub"], "rel": triple["rel"], "obj": triple["obj"]} for triple in all_triples]
-        self.triple_embs = self._embed([f"{triple['sub']} | {triple['rel']} | {triple['obj']}" for triple in self.triples])
+        self.triple_embs = self._embed(
+            [f"{triple['sub']} | {triple['rel']} | {triple['obj']}" for triple in self.triples])
 
         # Save the graph and metadata to disk
         if self.index_path:
             self.index_path.parent.mkdir(parents=True, exist_ok=True)
             graph_data = {
                 "n_nodes": graph.vcount(),
-                "edges": [(e.source, e.target, e["type"], e["label"]) for e in g.es],
+                "edges": [(e.source, e.target, e["type"], e["label"]) for e in graph.es],
                 "node_types": graph.vs["type"],
                 "node_texts": graph.vs["text"],
                 "node_original_ids": graph.vs["original_id"]
@@ -280,10 +281,9 @@ class HippoRAG2Memory:
                 content = clean_json_response(response.choices[0].message.content or "")
                 # Load triples from json content
                 triples = json.loads(content)
-                valid_triples = [tuple(t) for t in triples]
+                valid_triples = [tuple(t) for t in triples if isinstance(t, list) and len(t) == 3]
 
                 return valid_triples
-
             except Exception as e:
                 # Retry LLM extraction 3 times before aborting
                 print(f"RAG: LLM Attempt {attempt + 1} failed: {e}")
@@ -293,7 +293,8 @@ class HippoRAG2Memory:
 
     def _load_index(self) -> None:
         """
-        Checks if graph index is present in memory and loads it from disk if not.
+        Checks if graph index is present and loads it.
+        Reconstructs retrieval caches (triples, embeddings) if they are missing.
         """
         if self.knowledge_graph is not None and self.knowledge_graph.vcount() > 0:
             return
@@ -305,7 +306,6 @@ class HippoRAG2Memory:
             n_nodes = data["n_nodes"]
             self.knowledge_graph = ig.Graph(n=n_nodes, directed=True)
 
-            # Reconstruct edges and nodes
             if data["edges"]:
                 self.knowledge_graph.add_edges([(e[0], e[1]) for e in data["edges"]])
                 self.knowledge_graph.es["type"] = [e[2] for e in data["edges"]]
@@ -315,12 +315,25 @@ class HippoRAG2Memory:
             self.knowledge_graph.vs["text"] = data["node_texts"]
             self.knowledge_graph.vs["original_id"] = data.get("node_original_ids", [""] * n_nodes)
 
-            # Restore class attributes for retrieval
+            # Restore base structures
             self.phrase_list = [t for i, t in enumerate(data["node_texts"]) if data["node_types"][i] == "phrase"]
             self.passages = [{"id": orig, "text": txt} for i, (orig, txt) in
                              enumerate(zip(self.knowledge_graph.vs["original_id"], data["node_texts"])) if
                              data["node_types"][i] == "passage"]
             self.phrase_to_idx = {ph: i for i, ph in enumerate(self.phrase_list)}
+
+            self.passage_embs = self._embed([p["text"] for p in self.passages])
+
+            # Reconstruct triples from graph edges
+            self.triples = []
+            for e in self.knowledge_graph.es:
+                if e["type"] == "relation" and not e["label"].startswith("inv_"):
+                    sub = self.knowledge_graph.vs[e.source]["text"]
+                    obj = self.knowledge_graph.vs[e.target]["text"]
+                    self.triples.append({"sub": sub, "rel": e["label"], "obj": obj})
+
+            self.triple_embs = self._embed([f"{t['sub']} | {t['rel']} | {t['obj']}" for t in self.triples])
+
         else:
             raise RuntimeError("RAG: Index not found. Run build_index() beforehand.")
 
@@ -444,7 +457,7 @@ class HippoRAG2Memory:
         n_ph = len(self.phrase_list)
         pa_sims = self.passage_embs @ q_emb
         for pa_idx, sim in enumerate(pa_sims):
-            p[n_ph + pa_idx] = float(sim) * 0.05
+            p[n_ph + pa_idx] = float(np.maximum(0, sim)) * 0.05
 
         # Normalize the probability distribution so it sums up to exactly 1.0
         total = p.sum()
