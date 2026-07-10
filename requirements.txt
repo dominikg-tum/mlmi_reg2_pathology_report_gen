@@ -29,3 +29,11 @@ pillow>=10.0
 # rouge-score
 # sacrebleu
 # sentence-transformers
+
+# LoRA fine-tuning (cluster GPU only — see scripts/cluster/train_lora.sh)
+# Qwen3-VL needs a RECENT transformers; do NOT pin to the TITAN 4.46.0 used for data build.
+# torch
+# transformers>=4.57
+# peft
+# accelerate
+# safetensors>=0.4

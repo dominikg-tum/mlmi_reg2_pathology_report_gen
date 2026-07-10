@@ -2,10 +2,33 @@
 
 1. WP3 chains → `data/labels/chains.jsonl`
 2. `training/dataset.py` — build samples with **same** `--visual` / `--retriever` as inference
-3. `training/lora.py` — LoRA run on cluster
-4. Register `FineTunedBackend` in `agent/backends.py`
+3. `training/prompt.py` — turn each `ChainSample` into Qwen3-VL chat messages (train/serve parity)
+4. `training/lora.py` — LoRA run on cluster (Qwen3-VL-8B)
+5. `FineTunedBackend` in `agent/backends.py` (`backend=lora`) loads the adapter for inference
 
 See Patho-R1 for pathology CoT SFT practices.
+
+## Run order (cluster)
+
+```bash
+# 1. Build the training data (TITAN + patch cache; transformers==4.46.0 container)
+sbatch scripts/cluster/build_lora_dataset.sh          # -> $USER_ROOT/training/samples_train.jsonl (+ images/)
+
+# 2. LoRA train (RECENT transformers; SEPARATE container/session from step 1)
+sbatch scripts/cluster/train_lora.sh                  # -> $USER_ROOT/training/lora/qwen3vl_8b_v1
+
+# 3. Inference with the fine-tuned adapter
+LORA_ADAPTER_DIR=$USER_ROOT/training/lora/qwen3vl_8b_v1 \
+  python -m scripts.inference.run_test_baseline_batch --backend lora --split test ...
+```
+
+**Parity:** `training/prompt.py` reuses `agent.backends.build_answer_prompt`,
+`system_prompt_for`, and `visual_note_for_paths`, so the fine-tuned model trains on
+byte-identical prompts to what `FineTunedBackend` sends at serve time.
+
+**Container split:** the data builder pins `transformers==4.46.0` (TITAN requirement); the
+LoRA trainer needs `transformers>=4.57` for Qwen3-VL. Keep them in separate enroot
+sessions/containers.
 
 ## Default LoRA data (v1 — per-slide, matches inference)
 
