@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agent.types import Step
@@ -51,6 +52,49 @@ class AnswerBackend(Protocol):
     ) -> tuple[str, float]: ...
 
 
+def build_answer_prompt(
+    node: Node,
+    history: str,
+    visual_note: str,
+    extra_context: str = "",
+) -> str:
+    """Assemble the user-turn text for a graph node.
+
+    Single source of truth shared by ``ZeroShotQwenBackend`` (vLLM API), the local
+    ``FineTunedBackend``, and the LoRA training-data prompt builder so train and serve
+    see byte-identical prompts. ``history`` is the prior-answer Q/A block, ``visual_note``
+    describes the attached images (see :func:`_visual_prompt_note` /
+    :func:`visual_note_for_paths`).
+    """
+    prompt_parts = [f"Visual evidence:{visual_note or ' none attached.'}"]
+    if history:
+        prompt_parts.append(f"Prior diagnostic answers:\n{history}")
+    if extra_context:
+        prompt_parts.append(f"Additional context:\n{extra_context}")
+    if node.description:
+        prompt_parts.append(f"Diagnostic guidance:\n{node.description}")
+    prompt_parts.append(f"Current question:\n{node.question}")
+    if node.options:
+        prompt_parts.append(
+            "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
+        )
+    if node.node_kind == NodeKind.REPORT:
+        prompt_parts.append(REPORT_USER_INSTRUCTION)
+    elif node.interaction == InteractionType.FREE_TEXT:
+        prompt_parts.append("Return a concise pathology answer.")
+    else:
+        prompt_parts.append("Return exactly one allowed answer key.")
+    return "\n\n".join(prompt_parts)
+
+
+def system_prompt_for(node: Node) -> str:
+    return REPORT_SYSTEM_PROMPT if node.node_kind == NodeKind.REPORT else SYSTEM_PROMPT
+
+
+def memory_history(memory: list[Step]) -> str:
+    return "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in memory)
+
+
 class ZeroShotQwenBackend:
     def __init__(self, client: Any, model: str):
         self.client = client
@@ -64,27 +108,9 @@ class ZeroShotQwenBackend:
         *,
         extra_context: str = "",
     ) -> tuple[str, float]:
-        history = "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in memory)
+        history = memory_history(memory)
         visual_note = _visual_prompt_note(visual)
-        prompt_parts = [f"Visual evidence:{visual_note or ' none attached.'}"]
-        if history:
-            prompt_parts.append(f"Prior diagnostic answers:\n{history}")
-        if extra_context:
-            prompt_parts.append(f"Additional context:\n{extra_context}")
-        if node.description:
-            prompt_parts.append(f"Diagnostic guidance:\n{node.description}")
-        prompt_parts.append(f"Current question:\n{node.question}")
-        if node.options:
-            prompt_parts.append(
-                "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
-            )
-        if node.node_kind == NodeKind.REPORT:
-            prompt_parts.append(REPORT_USER_INSTRUCTION)
-        elif node.interaction == InteractionType.FREE_TEXT:
-            prompt_parts.append("Return a concise pathology answer.")
-        else:
-            prompt_parts.append("Return exactly one allowed answer key.")
-        prompt = "\n\n".join(prompt_parts)
+        prompt = build_answer_prompt(node, history, visual_note, extra_context)
         image_paths = _visual_image_paths(visual)
         content = build_user_content(prompt, image_paths)
 
@@ -93,7 +119,7 @@ class ZeroShotQwenBackend:
             if node.options:
                 extra_body["guided_choice"] = node.options
 
-        system_prompt = REPORT_SYSTEM_PROMPT if node.node_kind == NodeKind.REPORT else SYSTEM_PROMPT
+        system_prompt = system_prompt_for(node)
         resp = _chat_with_retry(
             self.client,
             model=self.model,
@@ -147,6 +173,22 @@ def _visual_prompt_note(visual: VisualBundle | None) -> str:
     return " no image evidence attached."
 
 
+def visual_note_for_paths(image_paths: list) -> str:
+    """Reconstruct the 'Visual evidence' note from already-materialized image paths.
+
+    Used by the LoRA training-data prompt builder, which no longer has the live
+    ``VisualBundle`` — only the saved image files. Mirrors the ``thumbnail`` branch of
+    :func:`_visual_prompt_note`: the first image is the whole-slide thumbnail (providers
+    always place it first in :func:`_visual_image_paths`) and the rest are patches.
+    """
+    n = len(image_paths)
+    if n == 0:
+        return ""
+    patch_count = n - 1
+    suffix = f" and {patch_count} retrieved patch images" if patch_count else ""
+    return f" whole-slide thumbnail{suffix} attached."
+
+
 def _visual_image_paths(visual: VisualBundle | None) -> list:
     if visual is None:
         return []
@@ -179,3 +221,106 @@ class DummyBackend:
         if node.edges:
             return next(iter(node.edges)), 1.0
         return "Sample pathology report.", 1.0
+
+
+class FineTunedBackend:
+    """Local HF inference for a LoRA-fine-tuned Qwen3-VL adapter (train/serve parity).
+
+    Loads the base VLM + PEFT adapter once, then answers each graph node with the SAME
+    system prompt, visual-evidence note, episodic history, and question layout used both
+    at zero-shot serving (``ZeroShotQwenBackend``) and during LoRA data generation. Heavy
+    deps (torch/transformers/peft) are imported lazily so the module still imports on a
+    laptop with no GPU.
+    """
+
+    def __init__(
+        self,
+        adapter_dir: str,
+        *,
+        base_model: str,
+        max_new_tokens: int = 512,
+        device: str | None = None,
+        dtype: str = "bfloat16",
+    ):
+        self.adapter_dir = str(adapter_dir)
+        self.base_model = str(base_model)
+        self.max_new_tokens = max_new_tokens
+        self._device = device
+        self._dtype = dtype
+        self._model = None
+        self._processor = None
+
+    def _ensure_loaded(self) -> None:
+        if self._model is not None:
+            return
+        import torch
+        from peft import PeftModel
+        from transformers import AutoProcessor
+
+        try:
+            from transformers import AutoModelForImageTextToText as _AutoVLM
+        except ImportError:  # older transformers
+            from transformers import AutoModelForVision2Seq as _AutoVLM
+
+        torch_dtype = getattr(torch, self._dtype, torch.bfloat16)
+        device_map = "auto" if self._device is None else None
+
+        base = _AutoVLM.from_pretrained(
+            self.base_model,
+            torch_dtype=torch_dtype,
+            device_map=device_map,
+            trust_remote_code=True,
+        )
+        model = PeftModel.from_pretrained(base, self.adapter_dir)
+        model.eval()
+        if device_map is None:
+            model.to(self._device)
+        self._model = model
+        self._processor = AutoProcessor.from_pretrained(
+            self.base_model, trust_remote_code=True
+        )
+
+    def answer(
+        self,
+        node: Node,
+        visual: VisualBundle | None,
+        memory: list[Step],
+        *,
+        extra_context: str = "",
+    ) -> tuple[str, float]:
+        self._ensure_loaded()
+        import torch
+
+        from vision.vlm_messages import _load_rgb_image
+
+        history = memory_history(memory)
+        visual_note = _visual_prompt_note(visual)
+        prompt = build_answer_prompt(node, history, visual_note, extra_context)
+        image_paths = [p for p in _visual_image_paths(visual) if p is not None]
+
+        user_content: list[dict[str, Any]] = [
+            {"type": "image"} for _ in image_paths
+        ]
+        user_content.append({"type": "text", "text": prompt})
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": system_prompt_for(node)}]},
+            {"role": "user", "content": user_content},
+        ]
+
+        text = self._processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        images = [_load_rgb_image(Path(p)) for p in image_paths] or None
+        inputs = self._processor(
+            text=[text], images=images, return_tensors="pt", padding=True
+        ).to(self._model.device)
+
+        with torch.no_grad():
+            generated = self._model.generate(
+                **inputs, max_new_tokens=self.max_new_tokens, do_sample=False
+            )
+        trimmed = generated[:, inputs["input_ids"].shape[1]:]
+        decoded = self._processor.batch_decode(
+            trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+        return (decoded[0].strip() if decoded else ""), 1.0

@@ -10,7 +10,12 @@ from typing import Any
 
 import yaml
 
-from agent.backends import AnswerBackend, DummyBackend, ZeroShotQwenBackend
+from agent.backends import (
+    AnswerBackend,
+    DummyBackend,
+    FineTunedBackend,
+    ZeroShotQwenBackend,
+)
 from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
 from agent.types import Step
@@ -45,6 +50,20 @@ def build_backend(name: str, cfg: dict | None = None) -> AnswerBackend:
         api_base_url = os.environ.get("QWEN_API_BASE", q["api_base_url"])
         client = openai.OpenAI(base_url=api_base_url, api_key=q["api_key"])
         return ZeroShotQwenBackend(client, q["model_name"])
+    if name == "lora":
+        lora_cfg = cfg.get("lora", {}) if isinstance(cfg, dict) else {}
+        adapter_dir = os.environ.get("LORA_ADAPTER_DIR") or lora_cfg.get("adapter_dir")
+        if not adapter_dir:
+            raise ValueError(
+                "backend='lora' requires the adapter path via $LORA_ADAPTER_DIR "
+                "or cfg['lora']['adapter_dir']"
+            )
+        base_model = (
+            os.environ.get("LORA_BASE_MODEL")
+            or lora_cfg.get("base_model")
+            or cfg["qwen"]["model_path"]
+        )
+        return FineTunedBackend(adapter_dir, base_model=base_model)
     raise ValueError(f"Unknown backend: {name!r}")
 
 
