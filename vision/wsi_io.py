@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import numpy as np
 
@@ -141,15 +141,26 @@ def iter_tissue_patches(
     stride: int | None = None,
     background_threshold: int = 220,
     max_patches: int = 0,
+    accept_patch: Callable[[np.ndarray, int, int, int], bool] | None = None,
 ) -> Iterator[tuple[object, tuple[int, int], int]]:
     """Yield (PIL RGB patch, level-0 coord, patch_size_lv0) for tissue tiles.
 
     Coordinates are top-left corners in level-0 pixel space, as required by TITAN.
     patch_size_lv0 is the spacing between adjacent patch origins at level 0.
+
+    When *accept_patch* is None, falls back to grayscale mean <= *background_threshold*.
+    Tiling should pass *max_patches=0* so all tissue coords are saved; subsampling
+    happens at encode time via ``vision.patch_sampling.select_coords_for_encode``.
     """
     import openslide
 
     stride = stride or patch_size
+
+    def _default_accept(arr: np.ndarray, _x0: int, _y0: int, _ps: int) -> bool:
+        return is_tissue_patch(arr, background_threshold)
+
+    predicate = accept_patch or _default_accept
+
     slide = openslide.OpenSlide(str(svs_path))
     try:
         level, level_downsample, patch_size_lv0 = _read_level_for_objective(
@@ -166,10 +177,10 @@ def iter_tissue_patches(
                     (patch_size, patch_size),
                 ).convert("RGB")
                 arr = np.asarray(region)
-                if not is_tissue_patch(arr, background_threshold):
-                    continue
                 x0 = int(x * level_downsample)
                 y0 = int(y * level_downsample)
+                if not predicate(arr, x0, y0, patch_size_lv0):
+                    continue
                 yield region, (x0, y0), patch_size_lv0
                 count += 1
                 if max_patches > 0 and count >= max_patches:
