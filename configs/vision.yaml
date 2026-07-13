@@ -36,6 +36,9 @@ magnification_bands:
 retrieval:
   # Default: cosine rank over full offline 20x pool. K-means pre-filter is ablation-only.
   fixed_pool: 20x
+  paired_regions:
+    enabled: true
+    min_dist_20x_px: 2048
   search_all_patches: true
   kmeans_k: 100  # used only when search_all_patches: false or --kmeans-pool
   top_k: 5

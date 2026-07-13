@@ -11,7 +11,7 @@ from graph.schema import Node
 from retrieval.base import PatchRetriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
-from vision.mag_config import clamp_runtime_zoom, fixed_retrieval_pool
+from vision.mag_config import clamp_runtime_zoom, fixed_retrieval_pool, paired_regions_config
 from vision.thumbnail import _bundle_from_retrieved
 from vision.wsi_io import zoom_crop_at_coord
 
@@ -61,10 +61,15 @@ def run_node_react(
     wsi_path: Path | None,
     prior_steps: list,
     max_iters: int = 3,
+    paired_regions: bool = False,
 ) -> NodeReactResult:
     pool = fixed_retrieval_pool()
     traces: list[dict[str, Any]] = []
     exclude: set[int] = set()
+    anchor_coord: tuple[int, int] | None = None
+    paired_cfg = paired_regions_config()
+    paired_enabled = paired_regions and bool(paired_cfg.get("enabled", True))
+    paired_min_dist = int(paired_cfg.get("min_dist_20x_px", 2048))
 
     last_answer_key = ""
     last_conf = 0.0
@@ -75,17 +80,33 @@ def run_node_react(
             sub_query=traces[-1].get("sub_query", ""),
         )
 
+        anchor_kw = {}
+        if (
+            it > 0
+            and paired_enabled
+            and node.spatial_policy == "paired_regions"
+            and anchor_coord is not None
+            and paired_min_dist > 0
+        ):
+            anchor_kw = {
+                "anchor_coord_lv0": anchor_coord,
+                "min_dist_lv0_px": paired_min_dist,
+            }
+
         retrieved = retriever.retrieve(
             query,
             slide_cache,
             level=pool,
             exclude=exclude or None,
+            **anchor_kw,
             wsi_path=wsi_path,
             return_images=wsi_path is not None,
             tier=node.tier.value,
             node_kind=node.node_kind.value,
         )
         bundle = _bundle_from_retrieved(retrieved, slide_cache, out_subdir="retrieved_react")
+        if it == 0:
+            anchor_coord = _best_coord(bundle)
 
         step_a_user = prompts.format_step_a_user(
             node=node,
@@ -120,6 +141,11 @@ def run_node_react(
             "iter": it,
             "pool": pool,
             "query": query,
+            "paired_regions": {
+                "enabled": paired_enabled and node.spatial_policy == "paired_regions",
+                "anchor_coord_lv0": anchor_coord,
+                "min_dist_lv0_px": paired_min_dist if node.spatial_policy == "paired_regions" else 0,
+            },
             "draft": draft,
             "reflect": {"sufficient": sufficient, "missing_info": missing_info},
             "raw_step_a": raw_a,

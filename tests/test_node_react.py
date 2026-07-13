@@ -27,7 +27,14 @@ class _Retriever:
         self.calls = []
 
     def retrieve(self, query, slide_cache, *, level="20x", exclude=None, **kwargs):
-        self.calls.append({"query": query, "level": level, "exclude": set(exclude or [])})
+        self.calls.append(
+            {
+                "query": query,
+                "level": level,
+                "exclude": set(exclude or []),
+                "kwargs": kwargs,
+            }
+        )
         return [
             RetrievedPatch(
                 patch_image=None,
@@ -96,4 +103,36 @@ def test_node_react_retrieve_then_sufficient(tmp_path):
     assert len(result.node_traces) == 2
     assert retriever.calls[0]["level"] == "20x"
     assert retriever.calls[1]["exclude"] == {1}
+
+
+def test_node_react_paired_regions_passes_anchor_kwargs(tmp_path):
+    node = _node()
+    node.spatial_policy = "paired_regions"
+    slide_cache = SlideCache(slide_id="case01.svs", cache_dir=tmp_path, thumbnail_path=None)
+    retriever = _Retriever()
+
+    backend = _Backend(
+        responses=[
+            {"answer_key": "endometrium", "rationale": "x", "confidence": 0.8},  # Step A
+            {"sufficient": False, "missing_info": "need more"},  # Step B
+            {"action": "retrieve", "sub_query": "different region", "zoom_level": "40x", "zoom_reason": ""},  # Step C
+            {"answer_key": "endometrium", "rationale": "x", "confidence": 0.9},  # Step A again
+            {"sufficient": True, "missing_info": ""},  # Step B again
+        ]
+    )
+
+    _ = run_node_react(
+        node,
+        backend=backend,
+        retriever=retriever,
+        slide_cache=slide_cache,
+        wsi_path=None,
+        prior_steps=[],
+        max_iters=3,
+        paired_regions=True,
+    )
+
+    # second retrieve should include anchor + min_dist kwargs
+    assert retriever.calls[1]["kwargs"]["anchor_coord_lv0"] == (1000, 2000)
+    assert retriever.calls[1]["kwargs"]["min_dist_lv0_px"] > 0
 

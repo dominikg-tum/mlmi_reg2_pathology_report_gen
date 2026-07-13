@@ -84,6 +84,10 @@ def default_search_all_patches() -> bool:
     return bool(retrieval_config().get("search_all_patches", True))
 
 
+def paired_regions_config() -> dict:
+    return retrieval_config().get("paired_regions", {})
+
+
 def fixed_retrieval_pool() -> str:
     """CONCH retrieval pool zoom key (default: 20x)."""
     pool = str(retrieval_config().get("fixed_pool", "20x"))

@@ -156,6 +156,8 @@ class TitanCosineRetriever:
         level: str = "20x",
         k: int | None = None,
         exclude: set[int] | None = None,
+        anchor_coord_lv0: tuple[int, int] | None = None,
+        min_dist_lv0_px: int = 0,
         wsi_path: Path | None = None,
         return_images: bool = True,
         tier: str | None = None,
@@ -180,11 +182,28 @@ class TitanCosineRetriever:
         if exclude:
             sims[list(exclude)] = -np.inf
 
-        order = np.argsort(-sims)
         ps_lv0 = slide.patch_size_lv0 or self._load_meta_patch_size(slide_cache, level)
         if ps_lv0 <= 0:
             raise RuntimeError(f"patch_size_lv0 missing in meta_{level}.json")
 
+        # Optional strict min-distance filter (paired_regions fallback).
+        # Evaluate in level-0 pixel space using patch centres.
+        if anchor_coord_lv0 is not None and min_dist_lv0_px > 0:
+            ax = float(anchor_coord_lv0[0] + ps_lv0 / 2.0)
+            ay = float(anchor_coord_lv0[1] + ps_lv0 / 2.0)
+            centres = pool_coords.astype(np.float64) + (ps_lv0 / 2.0)
+            dists = np.sqrt((centres[:, 0] - ax) ** 2 + (centres[:, 1] - ay) ** 2)
+            sims[dists < float(min_dist_lv0_px)] = -np.inf
+            if not np.isfinite(sims).any():
+                # Relax once.
+                relax = max(int(min_dist_lv0_px // 2), 0)
+                sims = _cosine(q, pool_emb)
+                if exclude:
+                    sims[list(exclude)] = -np.inf
+                if relax > 0:
+                    sims[dists < float(relax)] = -np.inf
+
+        order = np.argsort(-sims)
         accepted_local = self._diversity_filter_with_size(
             order, pool_coords, level=level, k=k, patch_size_lv0=ps_lv0
         )
