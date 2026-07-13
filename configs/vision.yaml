@@ -34,7 +34,9 @@ magnification_bands:
     conch_input_px: 224
 
 retrieval:
-  kmeans_k: 100
+  # Default: cosine rank over full offline 20x pool. K-means pre-filter is ablation-only.
+  search_all_patches: true
+  kmeans_k: 100  # used only when search_all_patches: false or --kmeans-pool
   top_k: 5
   top_k_by_zoom:
     5x: 3
@@ -58,6 +60,17 @@ retrieval:
     - 20x
   # abmil_fallback: reserved — only if cosine sim shows systematic failures (not implemented)
 
+# Offline tissue gate — slide-level HSV mask + per-patch tissue fraction (Phase B).
+tissue_filter:
+  method: slide_mask          # slide_mask | mean_threshold
+  mask_source: thumbnail      # thumbnail via openslide get_thumbnail
+  min_tissue_fraction: 0.40
+  hsv_sat_min: 0.08
+  hsv_val_max: 0.95
+  morph_close_px: 5
+  # Legacy fallback (method: mean_threshold)
+  background_threshold: 220
+
 defaults:
   visual: thumbnail
   retriever: none
@@ -67,5 +80,9 @@ titan:
   model_id: MahmoodLab/TITAN
   # Pinned runtime deps (install in enroot before encode): timm==1.0.3
   # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — use container torch; see load_paths.sh
-  max_patches_per_slide: 512
+  # Encode policy: n_tissue <= full_encode_threshold → encode ALL; else stratified grid → max_patches_per_slide
+  max_patches_per_slide: 4096
+  full_encode_threshold: 1024
+  patch_sampling: stratified_grid
+  grid_cells: [8, 8]
   batch_size: 16

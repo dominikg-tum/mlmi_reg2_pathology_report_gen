@@ -76,6 +76,30 @@ def retrieval_config() -> dict:
     return load_vision_config().get("retrieval", {})
 
 
+def default_search_all_patches() -> bool:
+    """Whether Phase 1 cosine retrieval ranks the full offline pool (default: true)."""
+    return bool(retrieval_config().get("search_all_patches", True))
+
+
+def tissue_filter_config() -> dict:
+    return load_vision_config().get("tissue_filter", {})
+
+
+def titan_config() -> dict:
+    return load_vision_config().get("titan", {})
+
+
+def tiling_encode_config() -> dict:
+    """Patch cap / stratified sampling knobs for offline CONCH encode."""
+    tcfg = titan_config()
+    return {
+        "max_patches_per_slide": int(tcfg.get("max_patches_per_slide", 4096)),
+        "full_encode_threshold": int(tcfg.get("full_encode_threshold", 1024)),
+        "patch_sampling": str(tcfg.get("patch_sampling", "stratified_grid")),
+        "grid_cells": tuple(int(x) for x in tcfg.get("grid_cells", [8, 8])),
+    }
+
+
 def encode_levels() -> list[str]:
     levels = retrieval_config().get("encode_levels", list(VALID_ZOOM_LEVELS))
     return [normalize_zoom(z) for z in levels]

@@ -8,6 +8,8 @@ from vision.mag_config import (
     mag_band_config,
     parent_zoom_for,
     retrieval_config,
+    tiling_encode_config,
+    tissue_filter_config,
     top_k_for_zoom,
     zoom_config,
 )
@@ -28,6 +30,7 @@ def test_retrieval_encode_levels():
     assert encode_levels() == ["5x", "10x", "20x"]
     rcfg = retrieval_config()
     assert rcfg["kmeans_k"] == 100
+    assert rcfg["search_all_patches"] is True
     assert top_k_for_zoom("5x") == 3
     assert top_k_for_zoom("20x") == 5
     assert rcfg["d_min_20x_px"] == 512
@@ -44,3 +47,16 @@ def test_include_grandparent_for_integration_nodes():
     assert include_grandparent(tier="integration")
     assert include_grandparent(node_kind="report")
     assert not include_grandparent(tier="local_features", node_kind="local")
+
+
+def test_tiling_encode_policy_defaults():
+    tcfg = tiling_encode_config()
+    assert tcfg["max_patches_per_slide"] == 4096
+    assert tcfg["full_encode_threshold"] == 1024
+    assert tcfg["grid_cells"] == (8, 8)
+
+
+def test_tissue_filter_slide_mask_default():
+    fcfg = tissue_filter_config()
+    assert fcfg["method"] == "slide_mask"
+    assert fcfg["min_tissue_fraction"] == 0.40

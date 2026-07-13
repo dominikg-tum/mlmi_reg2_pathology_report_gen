@@ -19,8 +19,9 @@ from scripts.vision._common import (
     slide_log_path,
 )
 from vision.cache import slide_cache_dir
-from vision.mag_config import VALID_ZOOM_LEVELS
+from vision.mag_config import VALID_ZOOM_LEVELS, thumbnail_config, tissue_filter_config
 from vision.patching import extract_patch_coords
+from vision.tissue_mask import build_mask_from_thumbnail, save_tissue_mask_png
 from vision.wsi_io import resolve_wsi_files, slide_id_from_path
 
 
@@ -38,10 +39,23 @@ def _tile_one(
         return
 
     coords, patch_size_lv0 = extract_patch_coords(
-        svs_path, mag_band=level, max_patches=max_patches
+        svs_path, mag_band=level, max_patches=0
     )
     if not coords:
         raise RuntimeError("no tissue patches")
+
+    tcfg = tissue_filter_config()
+    mask_path = out_dir / "tissue_mask.png"
+    if str(tcfg.get("method", "slide_mask")) == "slide_mask" and not mask_path.exists():
+        thumb_cfg = thumbnail_config()
+        mask = build_mask_from_thumbnail(
+            svs_path,
+            max_edge_px=int(thumb_cfg.get("max_edge_px", 1024)),
+            sat_min=float(tcfg.get("hsv_sat_min", 0.08)),
+            val_max=float(tcfg.get("hsv_val_max", 0.95)),
+            morph_close_px=int(tcfg.get("morph_close_px", 5)),
+        )
+        save_tissue_mask_png(mask, mask_path)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(np.asarray(coords, dtype=np.int64), coord_path)
@@ -49,7 +63,9 @@ def _tile_one(
         "slide_id": slide_id_from_path(svs_path),
         "level": level,
         "n_patches": len(coords),
+        "n_patches_tiled": len(coords),
         "patch_size_lv0": patch_size_lv0,
+        "tissue_filter": tcfg.get("method", "slide_mask"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     meta_path.write_text(json.dumps(meta, indent=2) + "\n")

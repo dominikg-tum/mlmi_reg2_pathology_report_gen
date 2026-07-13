@@ -24,6 +24,7 @@ from scripts.vision._common import (
 )
 from vision.cache import slide_cache_dir
 from vision.encoders.titan import TitanEncoder
+from vision.encode_selection import coords_for_encode
 from vision.patching import extract_patches, load_patches_from_coords
 from vision.wsi_io import resolve_wsi_files, slide_id_from_path
 
@@ -63,9 +64,8 @@ def _encode_one(
         if patch_size_lv0 <= 0:
             raise RuntimeError(f"coords exist but meta_{level}.json missing patch_size_lv0")
     else:
-        max_p = max_patches if max_patches > 0 else 0
         patches, coords, patch_size_lv0 = extract_patches(
-            svs_path, mag_band=level, max_patches=max_p
+            svs_path, mag_band=level, max_patches=0
         )
         if not patches:
             raise RuntimeError("no tissue patches")
@@ -77,6 +77,9 @@ def _encode_one(
             "slide_id": slide_id_from_path(svs_path),
             "level": level,
             "n_patches": len(patches),
+            "n_patches_tiled": len(patches),
+            "n_patches_encoded": len(patches),
+            "sampling_mode": "inline_tile",
             "patch_size_lv0": patch_size_lv0,
             "embedding_dim": int(emb.shape[1]) if emb.size else 0,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -85,31 +88,40 @@ def _encode_one(
         print(f"OK  {slide_id_from_path(svs_path)} {level} n={len(patches)} -> {emb_path}")
         return
 
-    if max_patches > 0:
-        coords = coords[:max_patches]
-    if not coords:
-        raise RuntimeError("no tissue patches")
+    encode_coords, sampling_mode, sampling_meta = coords_for_encode(
+        coords,
+        patch_size_lv0=patch_size_lv0,
+        max_patches=max_patches if max_patches > 0 else None,
+    )
+    if not encode_coords:
+        raise RuntimeError("no tissue patches after encode selection")
 
     feats: list[np.ndarray] = []
-    for start in range(0, len(coords), batch_size):
-        chunk_coords = coords[start : start + batch_size]
+    for start in range(0, len(encode_coords), batch_size):
+        chunk_coords = encode_coords[start : start + batch_size]
         patches = load_patches_from_coords(svs_path, chunk_coords, mag_band=level)
         feats.append(encoder.encode_patches(patches, batch_size=batch_size))
 
     emb = np.vstack(feats).astype(np.float32) if feats else np.zeros((0, 768), dtype=np.float32)
     out_dir.mkdir(parents=True, exist_ok=True)
-    torch.save({"embeddings": emb, "coords": np.asarray(coords)}, emb_path)
-    torch.save(np.asarray(coords, dtype=np.int64), coord_path)
+    torch.save({"embeddings": emb, "coords": np.asarray(encode_coords)}, emb_path)
+    torch.save(np.asarray(encode_coords, dtype=np.int64), coord_path)
     meta = {
         "slide_id": slide_id_from_path(svs_path),
         "level": level,
-        "n_patches": len(coords),
+        "n_patches": len(encode_coords),
         "patch_size_lv0": patch_size_lv0,
         "embedding_dim": int(emb.shape[1]) if emb.size else 0,
+        "sampling_mode": sampling_mode,
+        **sampling_meta,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     meta_path.write_text(json.dumps(meta, indent=2) + "\n")
-    print(f"OK  {slide_id_from_path(svs_path)} {level} n={len(coords)} -> {emb_path}")
+    print(
+        f"OK  {slide_id_from_path(svs_path)} {level} "
+        f"tiled={sampling_meta['n_patches_tiled']} encoded={len(encode_coords)} "
+        f"mode={sampling_mode} -> {emb_path}"
+    )
 
 
 def _check_only(cache_root: Path, data_dir: Path, levels: list[str]) -> None:
