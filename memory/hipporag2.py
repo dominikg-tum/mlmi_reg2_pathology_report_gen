@@ -8,17 +8,29 @@ https://arxiv.org/abs/2502.14802
 """
 
 import json
-import igraph as ig
 from pathlib import Path
 
 import re
 import time
 from typing import Any
-from openai import OpenAI
 import yaml
 from graph.schema import Node
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+try:
+    import igraph as ig
+except ImportError:
+    ig = None
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    SentenceTransformer = None
 
 # Path to repository root directory
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +57,22 @@ class HippoRAG2Memory:
         self.knowledge_graph = None
         # Mock LLM mode for testing purposes
         self.mock_llm = mock_llm
+
+        if SentenceTransformer is None:
+            raise ImportError(
+                "HippoRAG2 requires the optional dependency 'sentence-transformers'. "
+                "Install it with `pip install sentence-transformers`."
+            )
+        if ig is None:
+            raise ImportError(
+                "HippoRAG2 requires the optional dependency 'igraph'. "
+                "Install it with `pip install igraph`."
+            )
+        if not self.mock_llm and OpenAI is None:
+            raise ImportError(
+                "HippoRAG2 with mock_llm=False requires the optional dependency 'openai'. "
+                "Install it with `pip install openai`."
+            )
 
         # Initialize embedding model for vector search and synonym detection
         self.encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
