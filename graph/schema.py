@@ -81,6 +81,26 @@ class Node:
         d = self.description.strip()
         return f"{q} {d}".strip() if d else q
 
+    def retrieval_text_with_context(
+        self,
+        prior_steps: list[tuple[str, str]] | None = None,
+        *,
+        sub_query: str = "",
+    ) -> str:
+        """CONCH query with optional chain summary and ReAct sub_query.
+
+        Used at inference for spatial nodes and ReAct re-retrieve:
+        ``encode_text(node.retrieval_text_with_context(steps, sub_query=I_t))``
+        """
+        parts = [self.retrieval_text]
+        if prior_steps:
+            summary = "; ".join(f"{nid}={ans}" for nid, ans in prior_steps[-4:])
+            parts.append(f"Prior findings: {summary}.")
+        sq = sub_query.strip()
+        if sq:
+            parts.append(sq)
+        return " ".join(parts).strip()
+
     @property
     def retrieval_level_str(self) -> str:
         """Backward compat alias — retrievers select embeddings_{mag_band}.pt."""
