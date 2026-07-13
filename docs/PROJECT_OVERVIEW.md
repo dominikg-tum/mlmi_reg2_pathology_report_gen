@@ -22,8 +22,8 @@
 | ✅ Done   | **Runtime 40× zoom tool** — `vision/wsi_io.py` + ReAct zoom branch; no offline `patch_embeddings_40x.pt`                                                                                                                                                                                                     | DOMI                   |
 | ✅ Done   | **Phase 2 report prompts** — `agent/report_writer.py`: PathAgent observable-findings rules (no glossaries)                                                                                                                                                                                                   | DOMI                   |
 | ✅ Done   | **Retrieval coord logging** — patch coords in `cot_chain.json` / `node_traces[]` per patch node                                                                                                                                                                                                              | DOMI                   |
-| ⬜ Open   | `paired_regions` **geom filter (narrow fallback)** — only if ReAct ablation weak on `background_endometrium` + `stage_extent`                                                                                                                                                                                | DOMI                   |
-| ⬜ Open   | `spatial_policy` **tags (minimal)** — `paired_regions` + `specimen_global` only                                                                                                                                                                                                                              | DOGA                   |
+| ✅ Done   | `paired_regions` **geom filter (narrow fallback)** — strict min-distance re-retrieve for `background_endometrium` + `stage_extent` (ReAct)                                                                                                                                                                    | DOMI                   |
+| ✅ Done   | `spatial_policy` **tags (minimal)** — `paired_regions` on `background_endometrium` + `stage_extent`                                                                                                                                                                                                          | DOMI                   |
 | ⬜ Open   | **Retrieval ablation** — cosine-only vs `--structured-answer` vs `--node-react` vs ReAct + geom                                                                                                                                                                                                              | ALL                    |
 | ⬜ **Optional** | **Graph escape options** — add `unsure` + `none_of_above` on `*_assessment` / subtype nodes; wire edges ([§2j](#2j-graph-coverage-escape-hatches-optional))                                                                                                                                                    | DOGA                   |
 | ⬜ **Optional** | **`novel_finding_capture` node** — `multi_select` + `__default__` → `synthesis_interpretation` after `none_of_above` ([§2j](#2j-graph-coverage-escape-hatches-optional))                                                                                                                                     | DOGA                   |
@@ -1388,6 +1388,13 @@ python -m eval.run_eval --pred runs/predictions.jsonl --gt data/labels/chains.js
 python -m scripts.vision.tile_slides --slide CASE.svs
 python -m scripts.vision.encode_patches_offline --slide CASE.svs
 python -m scripts.vision.encode_slide_embeddings --slide CASE.svs
+
+# Patch ablations (local / cluster)
+# a/b1/b2: thumbnail-only baselines; p0..p3: patch retrieval ablations
+python -m scripts.inference.run_baseline_batch --baseline p0 --split test --slide-id CASE.svs
+python -m scripts.inference.run_baseline_batch --baseline p1 --split test --slide-id CASE.svs
+python -m scripts.inference.run_baseline_batch --baseline p2 --split test --slide-id CASE.svs
+python -m scripts.inference.run_baseline_batch --baseline p3 --split test --slide-id CASE.svs
 ```
 
 ---
