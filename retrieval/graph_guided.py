@@ -7,11 +7,11 @@ from pathlib import Path
 from retrieval.base import PatchRetriever
 from retrieval.titan_cosine import RetrievedPatch
 from vision.cache import SlideCache
-from vision.mag_config import top_k_for_zoom
+from vision.mag_config import fixed_retrieval_pool, top_k_for_zoom
 
 
 class GraphGuidedRetriever:
-    """Delegates to inner retriever; mag band comes from node.zoom_level (not a flat pool)."""
+    """Delegates to inner retriever; retrieval pool is fixed (default: 20x)."""
 
     def __init__(self, inner: PatchRetriever):
         self.inner = inner
@@ -21,7 +21,7 @@ class GraphGuidedRetriever:
         query: str,
         slide_cache: SlideCache,
         *,
-        level: str = "20x",
+        level: str | None = None,
         k: int | None = None,
         exclude: set[int] | None = None,
         wsi_path: Path | None = None,
@@ -29,6 +29,7 @@ class GraphGuidedRetriever:
         tier: str | None = None,
         node_kind: str | None = None,
     ) -> list[RetrievedPatch]:
+        level = fixed_retrieval_pool() if level is None else level
         if k is None:
             k = top_k_for_zoom(level)
         return self.inner.retrieve(

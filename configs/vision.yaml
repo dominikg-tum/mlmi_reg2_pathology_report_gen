@@ -35,6 +35,7 @@ magnification_bands:
 
 retrieval:
   # Default: cosine rank over full offline 20x pool. K-means pre-filter is ablation-only.
+  fixed_pool: 20x
   search_all_patches: true
   kmeans_k: 100  # used only when search_all_patches: false or --kmeans-pool
   top_k: 5
@@ -46,7 +47,7 @@ retrieval:
   d_min_20x_px: 512
   # CMT-style adjacent-scale context at retrieval (dual images to VLM, no learned fusion).
   adjacent_scale:
-    enabled: true
+    enabled: false
     parent_map:
       40x: 20x
       20x: 10x
@@ -55,8 +56,6 @@ retrieval:
   # CONCH offline: patch embedding pools per WSI (Phase 1 only).
   # 40x omitted for batch run — slow full-slide scan; add back when graph nodes need it.
   encode_levels:
-    - 5x
-    - 10x
     - 20x
   # abmil_fallback: reserved — only if cosine sim shows systematic failures (not implemented)
 

@@ -12,6 +12,9 @@ VISION_CONFIG_PATH = REPO_ROOT / "configs" / "vision.yaml"
 
 VALID_ZOOM_LEVELS = ("5x", "10x", "20x", "40x")
 
+# Runtime zoom menu for ReAct (pixels only, not offline CONCH pools).
+RUNTIME_ZOOM_LEVELS = ("10x", "20x", "40x")
+
 # Legacy aliases → canonical zoom keys used in graph JSON and artifact names.
 _ZOOM_ALIASES = {
     "4x": "5x",
@@ -79,6 +82,27 @@ def retrieval_config() -> dict:
 def default_search_all_patches() -> bool:
     """Whether Phase 1 cosine retrieval ranks the full offline pool (default: true)."""
     return bool(retrieval_config().get("search_all_patches", True))
+
+
+def fixed_retrieval_pool() -> str:
+    """CONCH retrieval pool zoom key (default: 20x)."""
+    pool = str(retrieval_config().get("fixed_pool", "20x"))
+    pool = normalize_zoom(pool)
+    if pool not in VALID_ZOOM_LEVELS:
+        raise ValueError(
+            f"retrieval.fixed_pool must be one of {VALID_ZOOM_LEVELS}; got {pool!r}"
+        )
+    return pool
+
+
+def clamp_runtime_zoom(zoom: str) -> str:
+    """Clamp arbitrary zoom strings to the allowed runtime zoom menu."""
+    key = normalize_zoom(zoom).replace("1.25x", "5x")
+    if key in RUNTIME_ZOOM_LEVELS:
+        return key
+    if key in ("4x", "5x"):
+        return "10x"
+    return "20x"
 
 
 def tissue_filter_config() -> dict:
