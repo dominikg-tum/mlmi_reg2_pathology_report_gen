@@ -53,6 +53,19 @@ class AgentRunResult:
     retrieval_log: list[dict[str, Any]]
 
 
+def resolve_search_all_patches(
+    *,
+    kmeans_pool: bool = False,
+    search_all_patches: bool = False,
+) -> bool | None:
+    """CLI override for retrieval pool. None → configs/vision.yaml default."""
+    if kmeans_pool:
+        return False
+    if search_all_patches:
+        return True
+    return None
+
+
 def run_agent_traversal(
     *,
     backend: str = "dummy",
@@ -64,7 +77,7 @@ def run_agent_traversal(
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
     skip_report_nodes: bool = False,
-    search_all_patches: bool = False,
+    search_all_patches: bool | None = None,
 ) -> AgentRunResult:
     cfg = load_paths_config()
     wsi_data_dir = wsi_data_dir or Path(cfg["cluster"]["data_dir"])

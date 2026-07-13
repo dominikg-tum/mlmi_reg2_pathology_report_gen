@@ -1,4 +1,4 @@
-"""TITAN text-guided cosine retrieval over K-means centroid pool (Phases 1, 2, 4)."""
+"""TITAN text-guided cosine retrieval over the 20x CONCH pool (Phases 1, 2, 4)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import numpy as np
 
 from vision.cache import SlideCache
 from vision.mag_config import (
+    default_search_all_patches,
     include_grandparent,
     mag_band_config,
     normalize_zoom,
@@ -53,10 +54,14 @@ class TitanCosineRetriever:
         *,
         top_k: int | None = None,
         d_min_20x: int | None = None,
-        search_all_patches: bool = False,
+        search_all_patches: bool | None = None,
     ):
         self.text_encoder = text_encoder
-        self.search_all_patches = search_all_patches
+        self.search_all_patches = (
+            search_all_patches
+            if search_all_patches is not None
+            else default_search_all_patches()
+        )
         rcfg = retrieval_config()
         self.top_k = top_k if top_k is not None else int(rcfg.get("top_k", 5))
         self.d_min_20x = d_min_20x if d_min_20x is not None else int(rcfg.get("d_min_20x_px", 512))

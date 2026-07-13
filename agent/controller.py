@@ -43,7 +43,7 @@ def traverse(
     confidence_threshold: float = 0.65,
     max_answer_attempts: int = 2,
     skip_report_nodes: bool = False,
-    search_all_patches: bool = False,
+    search_all_patches: bool | None = None,
     retrieval_log: list[dict[str, Any]] | None = None,
     fixed_visual_bundle: VisualBundle | None = None,
 ) -> list[Step]:
