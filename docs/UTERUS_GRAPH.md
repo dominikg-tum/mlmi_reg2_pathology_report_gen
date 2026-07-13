@@ -19,7 +19,7 @@ each node:
 3. the node's `edges` deterministically select the next node from that answer.
 
 **The model never chooses where to go — the graph does.** The graph also tells the system
-*how to look* (`zoom_level` selects the patch pool) and *what to show* the VLM
+*how to look* (`visual_policy`) and *what to show* the VLM
 (`visual_policy`: thumbnail, retrieved patches, or both).
 
 ### Sources
@@ -41,7 +41,7 @@ each node:
 | **Cover all compartments** | Myometrium, junctional zone, serosa/perimetrium, and the mass-lesion → histologic-type branch are all wired and converge on the shared integration tail | Matches every box in `uterus_graph.png`. |
 | **Shared neoplastic tail** | `microscopic_pattern` → `cellular_features` → `stage_extent` → `synthesis_interpretation` → `diagnosis` → `report` is reused by every malignant path | Avoids duplicating the integration logic per compartment; keeps the graph small and consistent. |
 | **`description` = retrieval text only** | Each `description` says *what to look for on the slide* (structure, cell type, pattern); it is never the displayed question | `description` is concatenated with `question` and encoded by CONCH/TITAN to retrieve patches. Specific morphology → sharper patch selection. |
-| **No `40x` anywhere** | Nodes that would ideally be 40x (nuclei, mitoses) use `20x` with sharper descriptions | Only `5x/10x/20x` pools are extracted offline; a `40x` value breaks retrieval. Stable node ids let us flip `zoom_level` later if 40x is added. |
+| **No offline multi-pool mags** | Offline CONCH pool is 20× only; fine detail is handled via runtime zoom crops | Retrieval always uses `patch_embeddings_20x.pt`. Runtime zoom uses `openslide` crops at `10x/20x/40x` without offline embedding pools. |
 | **Plain edges** | Edges are pure `{answer: next_node_id}` maps — no labels like `suggests_diagnosis` | The traversal engine keys navigation purely on the answer string; semantic edge labels are not part of this schema. |
 | **PathoGraph logic, not its labels** | Staged narrowing (preliminary → further → final), present/absent branches (hyperplasia atypia; smooth-muscle malignancy triad), differential convergence at synthesis | Steals the pathologist's reasoning structure without importing PathoGraph's OWL relations. |
 | **Updated two coupled tests** | `tests/test_graph_loader.py` and `tests/test_phase1_skip_report.py` were rewritten to validate the new structure | The old tests hard-coded the 3-node seed and the compartment→report bug we were told to fix. |
@@ -84,7 +84,7 @@ One JSON object per line. Every node carries the full field set required by the 
 | `interaction` | enum | `single_select` \| `multi_select` \| `boolean` \| `free_text`. |
 | `options` | list | Allowed answers. Every `single_select`/`boolean` option must have a matching `edges` key. |
 | `edges` | map | `{answer: next_node_id}`. `multi_select` uses `__default__` to converge. |
-| `zoom_level` | enum | `5x` \| `10x` \| `20x` — selects the offline CONCH patch pool. (No `40x`.) |
+| `zoom_level` | enum | Ontology hint for prompts and readability. Retrieval always uses the fixed 20× pool; runtime zoom can crop at `10x/20x/40x`. |
 | `visual_policy` | enum | `thumbnail_only` \| `patch_retrieve` \| `both`. |
 | `requires_visual_evidence` | bool | Whether the answer should be grounded in pixels. |
 | `root` | bool | Exactly one node is the entry point (`organ_procedure`). |
