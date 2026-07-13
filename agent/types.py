@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
+from typing import Any
 
 
 @dataclass
@@ -10,3 +12,4 @@ class Step:
     answer: str
     confidence: float
     next_question: str = ""
+    node_traces: list[dict[str, Any]] = field(default_factory=list)

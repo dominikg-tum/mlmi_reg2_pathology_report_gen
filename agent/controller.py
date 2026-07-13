@@ -15,6 +15,7 @@ from graph.schema import NodeKind
 from retrieval.base import PatchRetriever, get_retriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
+from vision.mag_config import fixed_retrieval_pool
 from vision.navigation import get_navigator
 
 
@@ -46,6 +47,8 @@ def traverse(
     search_all_patches: bool | None = None,
     retrieval_log: list[dict[str, Any]] | None = None,
     fixed_visual_bundle: VisualBundle | None = None,
+    node_react: bool = False,
+    structured_answer: bool = False,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
@@ -94,7 +97,8 @@ def traverse(
                 retrieval_log.append(
                     {
                         "node_id": node.id,
-                        "zoom_level": node.mag_band,
+                        "pool": fixed_retrieval_pool(),
+                        "node_zoom_hint": node.mag_band,
                         "query": node.retrieval_text,
                         "patches": patches_meta,
                     }
@@ -103,6 +107,7 @@ def traverse(
         answer = ""
         confidence = 0.0
         last_raw = ""
+        node_traces: list[dict[str, Any]] = []
         for attempt in range(max_answer_attempts):
             retry_note = ""
             if attempt:
@@ -110,6 +115,49 @@ def traverse(
                     "\nRetry instruction: your previous response was not a valid graph "
                     "answer. Return exactly one allowed answer key and nothing else."
                 )
+
+            if node_react and node.needs_patch_retrieval() and hasattr(backend, "complete_json"):
+                from agent.node_react import run_node_react
+
+                react = run_node_react(
+                    node,
+                    backend=backend,
+                    retriever=retriever,
+                    slide_cache=slide_cache,
+                    wsi_path=wsi_path,
+                    prior_steps=steps,
+                )
+                last_raw = react.answer_key
+                node_traces = react.node_traces
+                normalized = normalize_answer(react.answer_key, node)
+                if normalized is None:
+                    continue
+                answer, confidence = normalized, float(react.confidence)
+                break
+
+            if structured_answer and hasattr(backend, "complete_json"):
+                from agent import prompts
+
+                user_prompt = prompts.format_step_a_user(
+                    node=node,
+                    prior_steps=[(s.node_id, s.answer) for s in steps],
+                )
+                draft, raw_confidence, _raw = backend.complete_json(
+                    node,
+                    visual_bundle,
+                    system_prompt=prompts.STEP_A_SYSTEM,
+                    user_prompt=user_prompt,
+                    guided_choice=node.options or None,
+                )
+                answer_key = str(draft.get("answer_key", "")).strip()
+                normalized = normalize_answer(answer_key, node)
+                if normalized is None:
+                    continue
+                answer = normalized
+                confidence = float(draft.get("confidence", raw_confidence) or raw_confidence)
+                last_raw = answer_key
+                break
+
             raw, raw_confidence = backend.answer(
                 node,
                 visual_bundle,
@@ -140,7 +188,14 @@ def traverse(
             next_q = store.get_node(next_id).question
 
         steps.append(
-            Step(node.id, node.question, answer, confidence, next_question=next_q)
+            Step(
+                node.id,
+                node.question,
+                answer,
+                confidence,
+                next_question=next_q,
+                node_traces=node_traces,
+            )
         )
         mem.append(node.id, node.question, answer)
 
@@ -173,6 +228,7 @@ def chain_to_dict(
                 "question": s.question,
                 "answer": s.answer,
                 "next_question": s.next_question,
+                "node_traces": s.node_traces,
             }
             for s in steps
         ],

@@ -22,6 +22,12 @@ def main() -> None:
     parser.add_argument("--visual", default="patch_retrieve")
     parser.add_argument("--retriever", default="graph_guided")
     parser.add_argument("--navigator", default="graph_guided")
+    parser.add_argument("--node-react", action="store_true", help="Enable bounded per-node ReAct loop")
+    parser.add_argument(
+        "--structured-answer",
+        action="store_true",
+        help="Return Step A JSON only (no ReAct loop)",
+    )
     parser.add_argument("--runs-dir", type=Path, default=None)
     pool = parser.add_mutually_exclusive_group()
     pool.add_argument(
@@ -45,6 +51,8 @@ def main() -> None:
         navigator=args.navigator,
         slide_id=args.slide_id,
         skip_report_nodes=True,
+        node_react=args.node_react,
+        structured_answer=args.structured_answer,
         search_all_patches=resolve_search_all_patches(
             kmeans_pool=args.kmeans_pool,
             search_all_patches=args.search_all_patches,

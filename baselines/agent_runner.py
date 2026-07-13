@@ -78,6 +78,8 @@ def run_agent_traversal(
     wsi_data_dir: Path | None = None,
     skip_report_nodes: bool = False,
     search_all_patches: bool | None = None,
+    node_react: bool = False,
+    structured_answer: bool = False,
 ) -> AgentRunResult:
     cfg = load_paths_config()
     wsi_data_dir = wsi_data_dir or Path(cfg["cluster"]["data_dir"])
@@ -102,6 +104,8 @@ def run_agent_traversal(
         skip_report_nodes=skip_report_nodes,
         search_all_patches=search_all_patches,
         retrieval_log=retrieval_log,
+        node_react=node_react,
+        structured_answer=structured_answer,
     )
     chain = chain_to_dict(
         steps,
