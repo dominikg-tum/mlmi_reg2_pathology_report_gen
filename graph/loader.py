@@ -46,6 +46,7 @@ def _parse_node(raw: dict[str, Any]) -> Node:
     zoom_raw = raw.get("zoom_level")
     retrieval_raw = raw.get("retrieval_level")
     visual_raw = raw.get("visual_policy")
+    spatial_policy = str(raw.get("spatial_policy") or "")
     if zoom_raw:
         zoom_level = ZoomLevel(zoom_raw)
     elif retrieval_raw:
@@ -62,6 +63,7 @@ def _parse_node(raw: dict[str, Any]) -> Node:
         tier=tier,
         node_kind=node_kind,
         interaction=InteractionType(raw.get("interaction", "single_select")),
+        spatial_policy=spatial_policy,
         options=list(raw.get("options") or []),
         edges=dict(raw.get("edges") or {}),
         zoom_level=zoom_level,

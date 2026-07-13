@@ -61,6 +61,7 @@ class Node:
     node_kind: NodeKind
     interaction: InteractionType
     description: str = ""
+    spatial_policy: str = ""
     options: list[str] = field(default_factory=list)
     edges: dict[str, str] = field(default_factory=dict)
     zoom_level: ZoomLevel = ZoomLevel.X20
@@ -111,6 +112,8 @@ class Node:
             return None
         if self.interaction == InteractionType.MULTI_SELECT:
             return self.edges.get("__default__") or self.edges.get(answer)
+        if self.interaction == InteractionType.FREE_TEXT:
+            return self.edges.get("__default__")
         if answer not in self.edges:
             raise KeyError(
                 f"Answer {answer!r} not a valid edge of node {self.id!r}. "
