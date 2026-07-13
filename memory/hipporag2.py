@@ -57,6 +57,7 @@ class HippoRAG2Memory:
         self.knowledge_graph = None
         # Mock LLM mode for testing purposes
         self.mock_llm = mock_llm
+        self._steps = []
 
         if SentenceTransformer is None:
             raise ImportError(
@@ -116,13 +117,19 @@ class HippoRAG2Memory:
                 raw = json.loads(line)
 
                 # Filter by dataset split and extraction status
-                if split and raw.get("split") != split:
+                raw_split = raw.get("split")
+                if split and raw_split not in (None, "", split):
                     continue
                 if raw.get("extraction_status", "ok") != "ok":
                     continue
 
                 slide_id = str(raw.get("slide_id", ""))
-                chains = raw.get("chains", [])
+                chains = (
+                    raw.get("chains")
+                    or raw.get("chain-of-thought")
+                    or raw.get("qa_chain")
+                    or []
+                )
 
                 if not chains:
                     report = str(raw.get("report") or "").strip()
@@ -213,6 +220,7 @@ class HippoRAG2Memory:
         self.phrase_list = phrase_list
         self.passages = passages
         self.phrase_to_idx = phrase_to_id
+        self._steps = self.passages
 
         # Compute and cache embeddings for later retrieval
         self.passage_embs = self._embed([passage["text"] for passage in passages])
@@ -261,9 +269,8 @@ class HippoRAG2Memory:
             sims = chunk @ phrase_embs.T
             for local_i, row in enumerate(sims):
                 gi = start + local_i
-                for j in range(gi + 1, n):
-                    if float(row[j]) >= threshold:
-                        pairs.append((gi, j))
+                candidate_js = np.where(row[gi + 1:] >= threshold)[0] + (gi + 1)
+                pairs.extend((gi, int(j)) for j in candidate_js)
         return pairs
 
     def _extract_triples_with_llm(self, text: str):
@@ -349,6 +356,7 @@ class HippoRAG2Memory:
                              enumerate(zip(self.knowledge_graph.vs["original_id"], data["node_texts"])) if
                              data["node_types"][i] == "passage"]
             self.phrase_to_idx = {ph: i for i, ph in enumerate(self.phrase_list)}
+            self._steps = self.passages
 
             self.passage_embs = self._embed([p["text"] for p in self.passages])
 
@@ -442,14 +450,13 @@ class HippoRAG2Memory:
         # Convert the user query into a dense vector embedding
         q_emb = self._embed([query])[0]
 
-        if len(self.triples) == 0:
-            return "RAG: No triples found in graph."
-
-        # Finds the top semantic triples that best match the query
-        sims = self.triple_embs @ q_emb
-        top_k_triples = min(5, len(self.triples))
-        top_idx = np.argsort(sims)[::-1][:top_k_triples]
-        candidates = [(self.triples[i], float(sims[i])) for i in top_idx]
+        candidates = []
+        if len(self.triples) > 0:
+            # Finds the top semantic triples that best match the query
+            sims = self.triple_embs @ q_emb
+            top_k_triples = min(5, len(self.triples))
+            top_idx = np.argsort(sims)[::-1][:top_k_triples]
+            candidates = [(self.triples[i], float(sims[i])) for i in top_idx]
 
         # Use LLM to filter out triples that are contextually irrelevant
         filtered_triples = self._filter_triples_llm(query, candidates) if candidates else []
@@ -479,7 +486,7 @@ class HippoRAG2Memory:
         ranked_ph = sorted([(idx, float(np.mean(scores))) for idx, scores in ph_score_lists.items()],
                            key=lambda x: x[1], reverse=True)[:5]
         for ph_idx, score in ranked_ph:
-            p[ph_idx] = score
+            p[ph_idx] = max(0.0, score)
 
         # Assign a small baseline weight to all passage nodes based on their dense similarity to the query
         n_ph = len(self.phrase_list)
