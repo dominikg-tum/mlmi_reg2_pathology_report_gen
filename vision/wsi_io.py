@@ -115,6 +115,62 @@ def load_patch_at_coord(
         slide.close()
 
 
+def _zoom_crop_topleft(
+    coord_level0: tuple[int, int],
+    *,
+    from_patch_size_lv0: int,
+    to_patch_size_lv0: int,
+) -> tuple[int, int]:
+    cx = int(coord_level0[0] + from_patch_size_lv0 / 2.0)
+    cy = int(coord_level0[1] + from_patch_size_lv0 / 2.0)
+    x1 = int(round(cx - to_patch_size_lv0 / 2.0))
+    y1 = int(round(cy - to_patch_size_lv0 / 2.0))
+    return x1, y1
+
+
+def zoom_crop_at_coord(
+    svs_path: Path,
+    coord_level0: tuple[int, int],
+    *,
+    from_zoom: str = "20x",
+    to_zoom: str = "40x",
+):
+    """Crop a to_zoom tile centered on the from_zoom tile center (level-0 coords)."""
+    import openslide
+
+    from vision.mag_config import clamp_runtime_zoom, zoom_config
+
+    from_zoom = clamp_runtime_zoom(from_zoom)
+    to_zoom = clamp_runtime_zoom(to_zoom)
+
+    from_objective, from_patch_size, _ = zoom_config(from_zoom)
+    to_objective, to_patch_size, _ = zoom_config(to_zoom)
+
+    slide = openslide.OpenSlide(str(svs_path))
+    try:
+        _, _, from_ps_lv0 = _read_level_for_objective(slide, from_objective, from_patch_size)
+        _, _, to_ps_lv0 = _read_level_for_objective(slide, to_objective, to_patch_size)
+
+        x1, y1 = _zoom_crop_topleft(
+            coord_level0,
+            from_patch_size_lv0=from_ps_lv0,
+            to_patch_size_lv0=to_ps_lv0,
+        )
+
+        w0, h0 = slide.dimensions
+        x1 = max(0, min(int(x1), max(w0 - to_ps_lv0, 0)))
+        y1 = max(0, min(int(y1), max(h0 - to_ps_lv0, 0)))
+
+        return load_patch_at_coord(
+            svs_path,
+            (x1, y1),
+            objective=to_objective,
+            patch_size=to_patch_size,
+        )
+    finally:
+        slide.close()
+
+
 def find_parent_patch_index(
     coord_high: tuple[int, int],
     coords_medium: np.ndarray,
