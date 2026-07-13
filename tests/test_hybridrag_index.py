@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 from memory.hybridrag import (
     HybridRAGMemory,
+    get_reference_dir_default,
+    load_reference_documents,
     load_report_documents,
     read_hybridrag_manifest,
     write_hybridrag_manifest,
@@ -84,3 +86,59 @@ def test_ensure_loaded_uses_manifest_without_langchain(tmp_path: Path, monkeypat
 def test_ensure_loaded_false_when_index_missing(tmp_path: Path):
     mem = HybridRAGMemory(chroma_storage=tmp_path / "missing_chroma")
     assert mem.ensure_loaded(manifest_path=tmp_path / "missing_manifest.json") is False
+
+
+def test_load_reference_documents_from_jsonl(tmp_path: Path):
+    ref_root = tmp_path / "reference" / "uterus"
+    ref_root.mkdir(parents=True)
+    chunk = {
+        "id": "test_hyperplasia",
+        "title": "Test Hyperplasia",
+        "source": "unit test",
+        "source_type": "reference",
+        "topic": "endometrium",
+        "graph_nodes": ["endometrial_hyperplasia_grade"],
+        "tier": "local_features",
+        "text": "Crowded glands with cytologic atypia suggest AH/EIN.",
+    }
+    (ref_root / "chunks.jsonl").write_text(json.dumps(chunk) + "\n")
+
+    docs = load_reference_documents(ref_root.parent)
+    assert len(docs) == 1
+    assert docs[0]["metadata"]["source_type"] == "reference"
+    assert docs[0]["metadata"]["slide_id"] == "test_hyperplasia"
+    assert "AH/EIN" in docs[0]["page_content"]
+    assert docs[0]["metadata"]["graph_nodes"] == ["endometrial_hyperplasia_grade"]
+
+
+def test_load_reference_documents_missing_dir_returns_empty(tmp_path: Path):
+    assert load_reference_documents(tmp_path / "nope") == []
+
+
+def test_seed_uterus_reference_chunks_load():
+    ref_dir = get_reference_dir_default()
+    if not (ref_dir / "uterus" / "chunks.jsonl").exists():
+        pytest.skip("seed reference chunks not present in this checkout")
+    docs = load_reference_documents(ref_dir)
+    assert len(docs) >= 10
+    assert all(doc["metadata"]["source_type"] == "reference" for doc in docs)
+
+
+def test_hybridrag_manifest_includes_reference_fields(tmp_path: Path):
+    manifest = tmp_path / "hybridrag_manifest.json"
+    write_hybridrag_manifest(
+        manifest,
+        source_path=tmp_path / "labels.xlsx",
+        chroma_storage=tmp_path / "chroma_db",
+        split="train",
+        document_count=22,
+        report_document_count=10,
+        reference_document_count=12,
+        reference_dir=tmp_path / "reference",
+    )
+
+    loaded = read_hybridrag_manifest(manifest)
+    assert loaded is not None
+    assert loaded["reference_document_count"] == 12
+    assert loaded["report_document_count"] == 10
+    assert loaded["reference_dir"].endswith("reference")

@@ -10,7 +10,7 @@
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/build_hybridrag_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/build_hybridrag_%j.err
 #
-# Build HybridRAG Chroma + BM25 index from train-split labels xlsx.
+# Build HybridRAG Chroma + BM25 index from train-split labels xlsx + reference chunks.
 #
 # Usage:
 #   sbatch scripts/cluster/build_hybridrag_index.sh

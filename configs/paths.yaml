@@ -51,3 +51,5 @@ extraction:
 
 rag:
   chroma_db_storage: /mnt/projects/mlmi/reg2/chroma_db_storage
+  # Repo-relative when resolved in memory/hybridrag.py (works on laptop + cluster)
+  reference_dir: data/memory/reference
