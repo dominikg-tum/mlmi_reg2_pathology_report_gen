@@ -49,6 +49,7 @@ def traverse(
     fixed_visual_bundle: VisualBundle | None = None,
     node_react: bool = False,
     structured_answer: bool = False,
+    paired_regions: bool = False,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
@@ -126,6 +127,7 @@ def traverse(
                     slide_cache=slide_cache,
                     wsi_path=wsi_path,
                     prior_steps=steps,
+                    paired_regions=paired_regions,
                 )
                 last_raw = react.answer_key
                 node_traces = react.node_traces

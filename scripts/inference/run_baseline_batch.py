@@ -1,4 +1,4 @@
-"""Batch thumbnail baselines over a split from chains.jsonl."""
+"""Batch baselines over a split from chains.jsonl."""
 
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ class BaselineSpec:
     memory: str
     visual: str
     retriever: str
+    node_react: bool = False
+    structured_answer: bool = False
+    paired_regions: bool = False
 
 
 BASELINES: dict[str, BaselineSpec] = {
@@ -34,6 +37,31 @@ BASELINES: dict[str, BaselineSpec] = {
     ),
     "b2": BaselineSpec(
         "baseline_b2_hybridrag", memory="hybridrag", visual="thumbnail", retriever="none"
+    ),
+    "p0": BaselineSpec(
+        "baseline_p0_patch_cosine", memory="flat", visual="patch_retrieve", retriever="graph_guided"
+    ),
+    "p1": BaselineSpec(
+        "baseline_p1_patch_structured",
+        memory="flat",
+        visual="patch_retrieve",
+        retriever="graph_guided",
+        structured_answer=True,
+    ),
+    "p2": BaselineSpec(
+        "baseline_p2_patch_node_react",
+        memory="flat",
+        visual="patch_retrieve",
+        retriever="graph_guided",
+        node_react=True,
+    ),
+    "p3": BaselineSpec(
+        "baseline_p3_patch_node_react_paired",
+        memory="flat",
+        visual="patch_retrieve",
+        retriever="graph_guided",
+        node_react=True,
+        paired_regions=True,
     ),
 }
 
@@ -84,6 +112,9 @@ def run_one_slide(
         navigator=navigator,
         slide_id=slide_id,
         skip_report_nodes=False,
+        node_react=baseline.node_react,
+        structured_answer=baseline.structured_answer,
+        paired_regions=baseline.paired_regions,
     )
     path = write_phase1_outputs(result, runs_dir, slide_id)
     print(f"Completed {slide_id} -> {path}")
@@ -92,13 +123,13 @@ def run_one_slide(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run thumbnail baselines (A / B1 / B2) over chains.jsonl split."
+        description="Run baselines over chains.jsonl split."
     )
     parser.add_argument(
         "--baseline",
         choices=sorted(BASELINES),
         required=True,
-        help="a=flat, b1=hipporag2, b2=hybridrag",
+        help="a/b1/b2=thumbnail; p0=patch cosine; p1=structured; p2=node_react; p3=node_react+paired_regions",
     )
     parser.add_argument("--chains", type=Path, default=DEFAULT_CHAINS)
     parser.add_argument("--split", type=str, default="test")
