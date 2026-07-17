@@ -125,6 +125,8 @@ class ZeroShotQwenBackend:
         raw = (choice.message.content or "").strip()
         confidence = _first_token_prob(choice)
 
+        # Soft-fail on malformed JSON so traverse/node_react can retry the node
+        # instead of aborting the whole diagnostic chain.
         parsed: dict[str, Any] = {}
         try:
             parsed = json.loads(raw)
@@ -132,9 +134,14 @@ class ZeroShotQwenBackend:
             start = raw.find("{")
             end = raw.rfind("}")
             if start >= 0 and end > start:
-                parsed = json.loads(raw[start : end + 1])
+                try:
+                    parsed = json.loads(raw[start : end + 1])
+                except Exception:
+                    parsed = {}
             else:
-                raise
+                parsed = {}
+        if not isinstance(parsed, dict):
+            parsed = {}
         return parsed, confidence, raw
 
 

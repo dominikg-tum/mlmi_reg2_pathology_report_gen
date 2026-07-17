@@ -136,3 +136,61 @@ def test_node_react_paired_regions_passes_anchor_kwargs(tmp_path):
     assert retriever.calls[1]["kwargs"]["anchor_coord_lv0"] == (1000, 2000)
     assert retriever.calls[1]["kwargs"]["min_dist_lv0_px"] > 0
 
+
+def test_node_react_zoom_reanswers_with_zoom_patch(tmp_path, monkeypatch):
+    """Zoom must attach a crop and re-run Step A/B before the next retrieve loop."""
+    from PIL import Image
+
+    node = _node()
+    slide_cache = SlideCache(slide_id="case01.svs", cache_dir=tmp_path, thumbnail_path=None)
+    retriever = _Retriever()
+    wsi_path = tmp_path / "case01.svs"
+    wsi_path.write_bytes(b"fake")
+
+    seen_patch_counts: list[int] = []
+
+    class _CountingBackend(_Backend):
+        def complete_json(self, node, visual, *, system_prompt, user_prompt, guided_choice=None):
+            seen_patch_counts.append(len(visual.patch_paths))
+            return super().complete_json(
+                node,
+                visual,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                guided_choice=guided_choice,
+            )
+
+    backend = _CountingBackend(
+        responses=[
+            {"answer_key": "endometrium", "rationale": "x", "confidence": 0.7},  # A
+            {"sufficient": False, "missing_info": "need nuclear detail"},  # B
+            {"action": "zoom", "sub_query": "", "zoom_level": "40x", "zoom_reason": "nuclei"},  # C
+            {"answer_key": "endometrium", "rationale": "zoom ok", "confidence": 0.95},  # A post-zoom
+            {"sufficient": True, "missing_info": ""},  # B post-zoom
+        ]
+    )
+
+    def _fake_zoom(wsi, coord, *, from_zoom, to_zoom):
+        return Image.new("RGB", (64, 64), color=(200, 100, 50))
+
+    monkeypatch.setattr("agent.node_react.zoom_crop_at_coord", _fake_zoom)
+
+    result = run_node_react(
+        node,
+        backend=backend,
+        retriever=retriever,
+        slide_cache=slide_cache,
+        wsi_path=wsi_path,
+        prior_steps=[],
+        max_iters=3,
+    )
+
+    assert result.answer_key == "endometrium"
+    assert len(result.node_traces) == 1
+    assert result.node_traces[0]["action"] == "zoom"
+    assert "zoom_path" in result.node_traces[0]
+    # A, B, then post-zoom A/B — last two calls must see the zoom crop
+    assert seen_patch_counts[-2] >= 1
+    assert seen_patch_counts[-1] >= 1
+    assert len(retriever.calls) == 1  # no second retrieve after successful post-zoom
+

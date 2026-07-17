@@ -14,6 +14,7 @@ from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
 from agent.types import Step
 from vision.cache import SlideCache, build_slide_cache
+from vision.thumbnail import _resolve_wsi_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,6 +93,11 @@ def run_agent_traversal(
         build_slide_cache(cache_root, slide_id) if slide_id and cache_root else None
     )
 
+    # Resolve on-disk WSI so node_react zoom / return_images can attach patch PNGs.
+    wsi_path = _resolve_wsi_path(
+        slide_cache, wsi_path=None, wsi_data_dir=wsi_data_dir
+    )
+
     retrieval_log: list[dict[str, Any]] = []
     steps = traverse(
         answer_backend,
@@ -101,6 +107,7 @@ def run_agent_traversal(
         retriever_method=retriever,
         navigator_method=navigator,
         cache_root=cache_root,
+        wsi_path=wsi_path,
         wsi_data_dir=wsi_data_dir,
         skip_report_nodes=skip_report_nodes,
         search_all_patches=search_all_patches,

@@ -185,13 +185,57 @@ def run_node_react(
         if action == "zoom" and wsi_path is not None:
             coord = _best_coord(bundle)
             if coord is not None:
-                _ = _append_zoom_patch(
+                zoom_path = _append_zoom_patch(
                     bundle,
                     slide_cache=slide_cache,
                     wsi_path=wsi_path,
                     coord_level0=coord,
                     zoom_level=zoom_level,
                 )
+                # Re-run A/B with the zoom crop attached; otherwise the next loop
+                # rebuilds the bundle from retrieval and the zoom evidence is lost.
+                draft, conf_a, raw_a = backend.complete_json(
+                    node,
+                    bundle,
+                    system_prompt=prompts.STEP_A_SYSTEM,
+                    user_prompt=step_a_user,
+                    guided_choice=node.options or None,
+                )
+                answer_key = str(draft.get("answer_key", "")).strip()
+                last_answer_key = answer_key
+                last_conf = float(draft.get("confidence", conf_a) or conf_a)
+
+                b, _conf_b, raw_b = backend.complete_json(
+                    node,
+                    bundle,
+                    system_prompt=prompts.STEP_B_SYSTEM,
+                    user_prompt=prompts.format_step_b_user(
+                        node=node,
+                        draft_json=draft,
+                        prior_steps=_steps_for_retrieval(prior_steps),
+                    ),
+                )
+                sufficient = bool(b.get("sufficient", False))
+                missing_info = str(b.get("missing_info", "")).strip()
+                trace.update(
+                    {
+                        "zoom_path": str(zoom_path),
+                        "post_zoom_draft": draft,
+                        "post_zoom_reflect": {
+                            "sufficient": sufficient,
+                            "missing_info": missing_info,
+                        },
+                        "raw_step_a_post_zoom": raw_a,
+                        "raw_step_b_post_zoom": raw_b,
+                    }
+                )
+                if sufficient:
+                    traces.append(trace)
+                    return NodeReactResult(
+                        answer_key=answer_key,
+                        confidence=last_conf,
+                        node_traces=traces,
+                    )
         else:
             # retrieve branch: build exclude set from previously returned global indices
             for rp in retrieved:
