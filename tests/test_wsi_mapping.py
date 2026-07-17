@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from vision import wsi_mapping as wm
 from vision.wsi_io import resolve_wsi_files, slide_id_from_path
@@ -55,3 +56,31 @@ def test_repo_name_map_has_464_rows() -> None:
     assert rows[0].slide_id == "TUM_Uterus_0001.svs"
     assert rows[0].disk_name.endswith(".svs")
     assert rows[-1].slide_id == "TUM_Uterus_0464.svs"
+
+
+def test_find_named_svs_falls_back_on_nonzero_returncode(tmp_path: Path, monkeypatch) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    target = nested / "slide.svs"
+    target.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        wm.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="bad/path.svs\n"),
+    )
+    assert wm._find_named_svs(tmp_path, "slide.svs") == target
+
+
+def test_svs_basename_index_falls_back_on_nonzero_returncode(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "slide.svs"
+    target.write_bytes(b"x")
+    wm._svs_basename_index.cache_clear()
+
+    monkeypatch.setattr(
+        wm.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="bad/path.svs\n"),
+    )
+    index = wm._svs_basename_index(str(tmp_path.resolve()))
+    assert index == {"slide.svs": target}

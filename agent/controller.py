@@ -11,7 +11,7 @@ from agent.correction import check_consistency, should_retry
 from agent.memory import CaseMemory, GraphStore, JsonGraphStore
 from agent.types import Step
 from graph import GRAPH, ROOT_ID, Node
-from graph.schema import NodeKind
+from graph.schema import InteractionType, NodeKind
 from retrieval.base import PatchRetriever, get_retriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
@@ -117,7 +117,16 @@ def traverse(
                     "answer. Return exactly one allowed answer key and nothing else."
                 )
 
-            if node_react and node.needs_patch_retrieval() and hasattr(backend, "complete_json"):
+            choice_node = node.interaction in (
+                InteractionType.SINGLE_SELECT,
+                InteractionType.BOOLEAN,
+            )
+            if (
+                node_react
+                and choice_node
+                and node.needs_patch_retrieval()
+                and hasattr(backend, "complete_json")
+            ):
                 from agent.node_react import run_node_react
 
                 react = run_node_react(
@@ -137,7 +146,11 @@ def traverse(
                 answer, confidence = normalized, float(react.confidence)
                 break
 
-            if structured_answer and hasattr(backend, "complete_json"):
+            if (
+                structured_answer
+                and choice_node
+                and hasattr(backend, "complete_json")
+            ):
                 from agent import prompts
 
                 user_prompt = prompts.format_step_a_user(
@@ -149,7 +162,6 @@ def traverse(
                     visual_bundle,
                     system_prompt=prompts.STEP_A_SYSTEM,
                     user_prompt=user_prompt,
-                    guided_choice=node.options or None,
                 )
                 answer_key = str(draft.get("answer_key", "")).strip()
                 normalized = normalize_answer(answer_key, node)

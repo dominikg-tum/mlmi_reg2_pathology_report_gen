@@ -17,7 +17,7 @@ class _Backend:
 
     responses: list[dict]
 
-    def complete_json(self, node, visual, *, system_prompt, user_prompt, guided_choice=None):
+    def complete_json(self, node, visual, *, system_prompt, user_prompt):
         out = self.responses.pop(0)
         return out, float(out.get("confidence", 1.0)), "raw"
 
@@ -150,14 +150,13 @@ def test_node_react_zoom_reanswers_with_zoom_patch(tmp_path, monkeypatch):
     seen_patch_counts: list[int] = []
 
     class _CountingBackend(_Backend):
-        def complete_json(self, node, visual, *, system_prompt, user_prompt, guided_choice=None):
+        def complete_json(self, node, visual, *, system_prompt, user_prompt):
             seen_patch_counts.append(len(visual.patch_paths))
             return super().complete_json(
                 node,
                 visual,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                guided_choice=guided_choice,
             )
 
     backend = _CountingBackend(

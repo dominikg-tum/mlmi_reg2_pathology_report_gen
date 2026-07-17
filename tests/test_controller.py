@@ -5,6 +5,7 @@ from agent.backends import DummyBackend, ZeroShotQwenBackend
 from agent.controller import traverse
 from agent.memory import JsonGraphStore
 from graph import GRAPH, ROOT_ID
+from graph.schema import InteractionType, Node, NodeKind, Tier, VisualPolicy
 from vision.backends import VisualBundle
 
 
@@ -116,3 +117,86 @@ def test_fixed_visual_bundle_bypasses_retrieval(tmp_path):
     )
 
     assert steps[-1].node_id == "report"
+
+
+class _RouteBackend:
+    """Tracks whether structured JSON or plain answer path was used."""
+
+    def __init__(self):
+        self.answer_ids: list[str] = []
+        self.json_ids: list[str] = []
+
+    def answer(self, node, visual, memory, *, extra_context=""):
+        self.answer_ids.append(node.id)
+        if node.options:
+            return node.options[0], 0.9
+        return "free text report", 0.9
+
+    def complete_json(self, node, visual, *, system_prompt, user_prompt):
+        self.json_ids.append(node.id)
+        key = (node.options or ["yes"])[0]
+        return {"answer_key": key, "confidence": 0.9}, 0.9, "raw"
+
+
+def test_structured_answer_skips_non_choice_nodes():
+    """FREE_TEXT / MULTI_SELECT must use backend.answer, not Step A JSON."""
+    graph = {
+        "choice": Node(
+            id="choice",
+            label="choice",
+            question="Pick one?",
+            tier=Tier.GLOBAL_FEATURES,
+            node_kind=NodeKind.GLOBAL,
+            interaction=InteractionType.SINGLE_SELECT,
+            description="",
+            options=["a", "b"],
+            edges={"a": "multi", "b": "multi"},
+            visual_policy=VisualPolicy.THUMBNAIL_ONLY,
+            requires_visual_evidence=False,
+            is_leaf=False,
+            root=True,
+        ),
+        "multi": Node(
+            id="multi",
+            label="multi",
+            question="Select features?",
+            tier=Tier.LOCAL_FEATURES,
+            node_kind=NodeKind.LOCAL,
+            interaction=InteractionType.MULTI_SELECT,
+            description="",
+            options=["x", "y"],
+            edges={"x": "report", "y": "report"},
+            visual_policy=VisualPolicy.THUMBNAIL_ONLY,
+            requires_visual_evidence=False,
+            is_leaf=False,
+            root=False,
+        ),
+        "report": Node(
+            id="report",
+            label="report",
+            question="Write the report.",
+            tier=Tier.INTEGRATION,
+            node_kind=NodeKind.REPORT,
+            interaction=InteractionType.FREE_TEXT,
+            description="",
+            options=[],
+            edges={},
+            visual_policy=VisualPolicy.THUMBNAIL_ONLY,
+            requires_visual_evidence=False,
+            is_leaf=True,
+            root=False,
+        ),
+    }
+
+    backend = _RouteBackend()
+    steps = traverse(
+        backend,
+        graph=graph,
+        root_id="choice",
+        structured_answer=True,
+        skip_report_nodes=False,
+    )
+
+    assert [s.node_id for s in steps] == ["choice", "multi", "report"]
+    assert backend.json_ids == ["choice"]
+    assert backend.answer_ids == ["multi", "report"]

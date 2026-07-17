@@ -53,6 +53,8 @@ def stratified_grid_sample(
     selected: list[int] = []
     for cell_i, key in enumerate(cell_keys):
         quota = base + (1 if cell_i < remainder else 0)
+        if quota == 0:
+            continue
         members = buckets[key]
         if quota >= len(members):
             selected.extend(members)
@@ -65,7 +67,8 @@ def stratified_grid_sample(
         step = max(len(selected) // k, 1)
         selected = selected[::step][:k]
     elif len(selected) < k:
-        remaining = [i for i in range(len(pts)) if i not in set(selected)]
+        selected_set = set(selected)
+        remaining = [i for i in range(len(pts)) if i not in selected_set]
         need = k - len(selected)
         if remaining:
             extra_step = max(len(remaining) // need, 1)

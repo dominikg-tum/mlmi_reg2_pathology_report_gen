@@ -36,7 +36,10 @@ def main() -> None:
 
     for key in keys:
         spec = BASELINES[key]
-        runs_dir = args.runs_dir or default_runs_dir_for_baseline(spec, cfg)
+        if args.runs_dir is not None:
+            runs_dir = args.runs_dir / spec.name
+        else:
+            runs_dir = default_runs_dir_for_baseline(spec, cfg)
         pred_path = runs_dir / "predictions.jsonl"
         print(f"\n=== baseline {key} ({spec.name}) ===")
         print(f"runs_dir: {runs_dir}")

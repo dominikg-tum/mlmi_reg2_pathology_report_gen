@@ -140,8 +140,11 @@ def write_phase1_outputs(
     chain_path = out_dir / "cot_chain.json"
     chain_path.write_text(json.dumps(result.chain, indent=2) + "\n")
     report = str(result.chain.get("report", "") or "").strip()
+    report_path = out_dir / "report.txt"
     if report:
-        (out_dir / "report.txt").write_text(report + "\n")
+        report_path.write_text(report + "\n")
+    else:
+        report_path.unlink(missing_ok=True)
     if result.retrieval_log:
         (out_dir / "retrieval_log.json").write_text(
             json.dumps(result.retrieval_log, indent=2) + "\n"

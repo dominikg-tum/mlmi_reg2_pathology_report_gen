@@ -104,8 +104,8 @@ def _encode_one(
 
     emb = np.vstack(feats).astype(np.float32) if feats else np.zeros((0, 768), dtype=np.float32)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Leave coords_{level}.pt as the full tiled pool; encode_coords live in emb payload.
     torch.save({"embeddings": emb, "coords": np.asarray(encode_coords)}, emb_path)
-    torch.save(np.asarray(encode_coords, dtype=np.int64), coord_path)
     meta = {
         "slide_id": slide_id_from_path(svs_path),
         "level": level,

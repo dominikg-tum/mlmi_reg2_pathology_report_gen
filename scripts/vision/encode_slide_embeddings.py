@@ -112,9 +112,60 @@ def encode_one_slide(
     if not encode_coords:
         raise RuntimeError(f"No tissue patches for slide embedding on {svs_path}")
 
+    n_emb = int(patch_emb.shape[0]) if patch_emb is not None else 0
+    if patch_emb is not None and len(encode_coords) != n_emb:
+        # Legacy coords_20x.pt is often the full tile pool while emb is sampled.
+        # Rebuild via the non-cache path when we can form a consistent coord set.
+        n_coords = len(encode_coords)
+        patch_emb = None
+        if patch_size_lv0 <= 0:
+            raise RuntimeError(
+                f"Cache mismatch for {sid}: patch_embeddings_20x.pt has {n_emb} rows "
+                f"but encode_coords has {n_coords}; cannot rebuild without positive "
+                f"patch_size_lv0 in meta_20x.json"
+            )
+        if coord_path.exists():
+            coords = load_coords_from_pt(coord_path)
+        else:
+            coords, patch_size_lv0 = extract_patch_coords(
+                svs_path, mag_band="20x", max_patches=0
+            )
+        encode_coords, sampling_mode, sampling_meta = coords_for_encode(
+            coords, patch_size_lv0=patch_size_lv0, max_patches=max_patches
+        )
+        if not encode_coords:
+            raise RuntimeError(
+                f"No tissue patches after rebuild for slide embedding on {svs_path}"
+            )
+
+    if patch_size_lv0 <= 0:
+        if coord_path.exists():
+            raise RuntimeError(
+                f"coords_20x.pt exists but meta_20x.json missing positive "
+                f"patch_size_lv0 for {sid}"
+            )
+        _, patch_size_lv0 = extract_patch_coords(
+            svs_path, mag_band="20x", max_patches=0
+        )
+        if patch_size_lv0 <= 0:
+            raise RuntimeError(
+                f"Could not recover positive patch_size_lv0 for {sid}"
+            )
+
     if patch_emb is None:
         patches = load_patches_from_coords(svs_path, encode_coords, mag_band="20x")
         patch_emb = encoder.encode_patches(patches, batch_size=batch_size)
+
+    if patch_size_lv0 <= 0:
+        raise RuntimeError(
+            f"patch_size_lv0 must be positive before encode_slide for {sid} "
+            f"(got {patch_size_lv0})"
+        )
+    if len(encode_coords) != int(patch_emb.shape[0]):
+        raise RuntimeError(
+            f"encode_coords/patch_emb count mismatch for {sid}: "
+            f"{len(encode_coords)} coords vs {int(patch_emb.shape[0])} embeddings"
+        )
 
     slide_emb = encoder.encode_slide(
         patch_emb,

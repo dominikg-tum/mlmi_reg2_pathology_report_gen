@@ -121,6 +121,9 @@ def _find_named_svs(data_dir: Path, basename: str) -> Path | None:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         matches = list(data_dir.rglob(basename))
         return matches[0] if matches else None
+    if proc.returncode != 0:
+        matches = list(data_dir.rglob(basename))
+        return matches[0] if matches else None
     line = (proc.stdout or "").strip().splitlines()
     if line:
         return Path(line[0])
@@ -164,6 +167,8 @@ def _svs_basename_index(data_dir_str: str) -> dict[str, Path]:
             timeout=600,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        return {path.name.lower(): path for path in sorted(data_dir.rglob("*.svs"))}
+    if proc.returncode != 0:
         return {path.name.lower(): path for path in sorted(data_dir.rglob("*.svs"))}
     out: dict[str, Path] = {}
     for line in (proc.stdout or "").splitlines():

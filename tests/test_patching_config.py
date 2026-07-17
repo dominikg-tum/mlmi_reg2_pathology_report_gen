@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
+import numpy as np
+
 from vision.mag_config import (
     encode_levels,
     fixed_retrieval_pool,
@@ -14,6 +19,7 @@ from vision.mag_config import (
     top_k_for_zoom,
     zoom_config,
 )
+from vision import patching
 
 
 def test_zoom_bands_native_patch_sizes():
@@ -62,3 +68,24 @@ def test_tissue_filter_slide_mask_default():
     fcfg = tissue_filter_config()
     assert fcfg["method"] == "slide_mask"
     assert fcfg["min_tissue_fraction"] == 0.40
+
+
+def test_background_threshold_override_reaches_accept_fn():
+    """Caller override must drive mean_threshold; None keeps YAML default."""
+    yaml_val = int(tissue_filter_config().get("background_threshold", 220))
+    assert patching._resolve_background_threshold(None) == yaml_val
+    assert patching._resolve_background_threshold(180) == 180
+
+    fake_cfg = {
+        **tissue_filter_config(),
+        "method": "mean_threshold",
+        "background_threshold": 220,
+    }
+    white = np.full((8, 8, 3), 200, dtype=np.uint8)
+    with patch.object(patching, "tissue_filter_config", return_value=fake_cfg):
+        fn_yaml = patching._patch_accept_fn_for_slide(Path("dummy.svs"))
+        assert fn_yaml(white, 0, 0, 8)  # 200 <= 220
+        fn_strict = patching._patch_accept_fn_for_slide(
+            Path("dummy.svs"), background_threshold=100
+        )
+        assert not fn_strict(white, 0, 0, 8)  # 200 > 100

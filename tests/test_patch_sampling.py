@@ -52,3 +52,11 @@ def test_select_coords_direct_api():
     )
     assert mode == "full"
     assert len(out) == 2
+
+
+def test_stratified_handles_zero_quota_cells():
+    # More occupied cells than k => some cells get quota 0; must not divide by zero.
+    coords = [(x * 1000, y * 1000) for y in range(4) for x in range(4)]
+    picked = stratified_grid_sample(coords, k=3, grid_cells=(4, 4), patch_size_lv0=512)
+    assert len(picked) == 3
+    assert len(set(picked)) == 3

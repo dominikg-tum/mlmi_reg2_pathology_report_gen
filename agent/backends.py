@@ -102,14 +102,9 @@ class ZeroShotQwenBackend:
         *,
         system_prompt: str,
         user_prompt: str,
-        guided_choice: list[str] | None = None,
     ) -> tuple[dict[str, Any], float, str]:
         image_paths = _visual_image_paths(visual)
         content = build_user_content(user_prompt, image_paths)
-
-        extra_body: dict[str, Any] = {}
-        if guided_choice:
-            extra_body["guided_choice"] = guided_choice
 
         resp = self.client.chat.completions.create(
             model=self.model,
@@ -119,7 +114,6 @@ class ZeroShotQwenBackend:
             ],
             temperature=0.0,
             logprobs=True,
-            extra_body=extra_body or None,
         )
         choice = resp.choices[0]
         raw = (choice.message.content or "").strip()

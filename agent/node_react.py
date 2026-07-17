@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agent import prompts
+from agent.answers import normalize_answer
 from graph.schema import Node
 from retrieval.base import PatchRetriever
 from vision.backends import VisualBundle
@@ -117,9 +118,11 @@ def run_node_react(
             bundle,
             system_prompt=prompts.STEP_A_SYSTEM,
             user_prompt=step_a_user,
-            guided_choice=node.options or None,
         )
         answer_key = str(draft.get("answer_key", "")).strip()
+        normalized = normalize_answer(answer_key, node)
+        if normalized is not None:
+            answer_key = normalized
         last_answer_key = answer_key
         last_conf = float(draft.get("confidence", conf_a) or conf_a)
 
@@ -199,9 +202,11 @@ def run_node_react(
                     bundle,
                     system_prompt=prompts.STEP_A_SYSTEM,
                     user_prompt=step_a_user,
-                    guided_choice=node.options or None,
                 )
                 answer_key = str(draft.get("answer_key", "")).strip()
+                normalized = normalize_answer(answer_key, node)
+                if normalized is not None:
+                    answer_key = normalized
                 last_answer_key = answer_key
                 last_conf = float(draft.get("confidence", conf_a) or conf_a)
 

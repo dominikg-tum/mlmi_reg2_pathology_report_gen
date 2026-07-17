@@ -9,6 +9,7 @@ lexical keyword search (BM25).
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 import os
 import re
@@ -92,15 +93,20 @@ class HybridRAGMemory(SemanticMemory):
 
         Raises:
             FileNotFoundError: If the specified Excel file does not exist.
+            RuntimeError: If an existing Chroma index does not match the current
+                corpus fingerprint and ``force_rebuild`` is False.
         """
         ref_dir = Path(reference_dir) if reference_dir is not None else get_reference_dir_default()
-        report_docs = load_report_documents(train_reports_path, split=split)
+        source_path = Path(train_reports_path)
+        report_docs = load_report_documents(source_path, split=split)
         reference_docs = load_reference_documents(ref_dir)
-        documents = _as_langchain_documents(report_docs + reference_docs)
-
-        from langchain_chroma import Chroma
-        from langchain_community.retrievers import BM25Retriever
-        from langchain_classic.retrievers import EnsembleRetriever
+        corpus_fingerprint = compute_corpus_fingerprint(
+            source_path=source_path,
+            split=split,
+            report_docs=report_docs,
+            reference_docs=reference_docs,
+            reference_dir=ref_dir,
+        )
 
         # Delete existing index if force_build
         if force_rebuild and os.path.exists(self.chroma_storage):
@@ -116,19 +122,38 @@ class HybridRAGMemory(SemanticMemory):
             gc.collect()
             shutil.rmtree(self.chroma_storage)
 
-        # Load semantic embeddings storage from file
-        if os.path.exists(self.chroma_storage):
+        # Load existing Chroma only when corpus fingerprint matches; otherwise rebuild
+        # (force_rebuild) or require an explicit rebuild.
+        chroma_exists = os.path.exists(self.chroma_storage)
+        if chroma_exists:
+            stored_fingerprint = read_corpus_fingerprint(self.chroma_storage)
+            stored_digest = stored_fingerprint.get("digest") if stored_fingerprint else None
+            if stored_digest != corpus_fingerprint["digest"]:
+                raise RuntimeError(
+                    "RAG: Existing Chroma index does not match the current corpus "
+                    f"(source={source_path}, split={split!r}, reference_dir={ref_dir}). "
+                    "Rebuild with force_rebuild=True or: "
+                    "python -m scripts.memory.build_hybridrag_index --force-rebuild"
+                )
+
+        documents = _as_langchain_documents(report_docs + reference_docs)
+
+        from langchain_chroma import Chroma
+        from langchain_community.retrievers import BM25Retriever
+        from langchain_classic.retrievers import EnsembleRetriever
+
+        if chroma_exists:
             self.vector_storage = Chroma(
-                persist_directory=self.chroma_storage,
+                persist_directory=str(self.chroma_storage),
                 embedding_function=self.embeddings,
             )
-        # Create semantic embeddings and save to file
         else:
             self.vector_storage = Chroma.from_documents(
                 documents,
                 self.embeddings,
-                persist_directory=self.chroma_storage,
+                persist_directory=str(self.chroma_storage),
             )
+            write_corpus_fingerprint(self.chroma_storage, corpus_fingerprint)
 
         # Create retriever in initialization progress
         self.vector_retriever = self.vector_storage.as_retriever()
@@ -410,6 +435,68 @@ def _as_langchain_documents(rows: list[ReportDocument]) -> list[Any]:
         Document(page_content=row["page_content"], metadata=row["metadata"])
         for row in rows
     ]
+
+
+def corpus_fingerprint_path(chroma_storage: str | Path) -> Path:
+    """Sidecar path for the corpus fingerprint next to Chroma storage."""
+    return Path(chroma_storage) / "corpus_fingerprint.json"
+
+
+def compute_corpus_fingerprint(
+    *,
+    source_path: str | Path,
+    split: str,
+    report_docs: list[ReportDocument],
+    reference_docs: list[ReportDocument],
+    reference_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """
+    Fingerprint covering source path, split, and report/reference document contents.
+
+    Used to refuse silently reusing a Chroma index built for a different corpus.
+    """
+    ref_dir = Path(reference_dir) if reference_dir is not None else get_reference_dir_default()
+    payload = {
+        "source_path": str(Path(source_path).resolve()),
+        "split": split,
+        "reference_dir": str(ref_dir.resolve()) if ref_dir.exists() else str(ref_dir),
+        "report_document_count": len(report_docs),
+        "reference_document_count": len(reference_docs),
+        "documents": [
+            {
+                "page_content": doc["page_content"],
+                "metadata": doc["metadata"],
+            }
+            for doc in report_docs + reference_docs
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+    return {
+        "digest": digest,
+        "source_path": payload["source_path"],
+        "split": payload["split"],
+        "reference_dir": payload["reference_dir"],
+        "report_document_count": payload["report_document_count"],
+        "reference_document_count": payload["reference_document_count"],
+    }
+
+
+def read_corpus_fingerprint(chroma_storage: str | Path) -> dict[str, Any] | None:
+    path = corpus_fingerprint_path(chroma_storage)
+    if not path.exists():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not raw.get("digest"):
+        return None
+    return raw
+
+
+def write_corpus_fingerprint(chroma_storage: str | Path, fingerprint: dict[str, Any]) -> None:
+    path = corpus_fingerprint_path(chroma_storage)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
 
 
 def write_hybridrag_manifest(

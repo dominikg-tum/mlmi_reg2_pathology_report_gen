@@ -180,7 +180,7 @@ class TitanCosineRetriever:
         q = self.encode_query(query)
         sims = _cosine(q, pool_emb)
         if exclude:
-            sims[list(exclude)] = -np.inf
+            sims[np.isin(pool_indices, list(exclude))] = -np.inf
 
         ps_lv0 = slide.patch_size_lv0 or self._load_meta_patch_size(slide_cache, level)
         if ps_lv0 <= 0:
@@ -199,11 +199,12 @@ class TitanCosineRetriever:
                 relax = max(int(min_dist_lv0_px // 2), 0)
                 sims = _cosine(q, pool_emb)
                 if exclude:
-                    sims[list(exclude)] = -np.inf
+                    sims[np.isin(pool_indices, list(exclude))] = -np.inf
                 if relax > 0:
                     sims[dists < float(relax)] = -np.inf
 
         order = np.argsort(-sims)
+        order = order[sims[order] != -np.inf]
         accepted_local = self._diversity_filter_with_size(
             order, pool_coords, level=level, k=k, patch_size_lv0=ps_lv0
         )
