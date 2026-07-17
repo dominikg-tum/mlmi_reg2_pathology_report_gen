@@ -25,7 +25,7 @@ from scripts.vision._common import (
 from vision.cache import slide_cache_dir
 from vision.encoders.titan import TitanEncoder
 from vision.encode_selection import coords_for_encode
-from vision.patching import extract_patches, load_patches_from_coords
+from vision.patching import extract_patch_coords, load_patches_from_coords
 from vision.wsi_io import resolve_wsi_files, slide_id_from_path
 
 
@@ -64,29 +64,14 @@ def _encode_one(
         if patch_size_lv0 <= 0:
             raise RuntimeError(f"coords exist but meta_{level}.json missing patch_size_lv0")
     else:
-        patches, coords, patch_size_lv0 = extract_patches(
+        # Coords-only tiling; encode via shared sampling + chunked load below.
+        coords, patch_size_lv0 = extract_patch_coords(
             svs_path, mag_band=level, max_patches=0
         )
-        if not patches:
+        if not coords:
             raise RuntimeError("no tissue patches")
-        emb = encoder.encode_patches(patches, batch_size=batch_size)
         out_dir.mkdir(parents=True, exist_ok=True)
-        torch.save({"embeddings": emb, "coords": np.asarray(coords)}, emb_path)
         torch.save(np.asarray(coords, dtype=np.int64), coord_path)
-        meta = {
-            "slide_id": slide_id_from_path(svs_path),
-            "level": level,
-            "n_patches": len(patches),
-            "n_patches_tiled": len(patches),
-            "n_patches_encoded": len(patches),
-            "sampling_mode": "inline_tile",
-            "patch_size_lv0": patch_size_lv0,
-            "embedding_dim": int(emb.shape[1]) if emb.size else 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
-        print(f"OK  {slide_id_from_path(svs_path)} {level} n={len(patches)} -> {emb_path}")
-        return
 
     encode_coords, sampling_mode, sampling_meta = coords_for_encode(
         coords,
