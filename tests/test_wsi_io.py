@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-import numpy as np
+from pathlib import Path
 
 import numpy as np
 
 from vision.wsi_io import _zoom_crop_topleft, find_parent_patch_index, is_tissue_patch, slide_id_from_path
 
 
-def test_slide_id_from_path():
-    assert slide_id_from_path(__import__("pathlib").Path("a/b/case01.svs")) == "case01.svs"
+def test_slide_id_from_path_unmapped():
+    assert slide_id_from_path(Path("a/b/case01.svs")) == "case01.svs"
+
+
+def test_slide_id_from_path_mapped_uuid():
+    assert (
+        slide_id_from_path(Path("be61bc63-d708-4b81-9ea0-2370524e73a8.svs"))
+        == "TUM_Uterus_0001.svs"
+    )
 
 
 def test_is_tissue_patch_filters_white():

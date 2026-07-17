@@ -36,6 +36,10 @@ rsync -avz -e "ssh -o ForwardX11=no" "${DRY_RUN[@]}" \
   --exclude '*.pyc' \
   --exclude 'ssh.out' \
   --exclude 'ssh.err' \
+  --exclude '.submit_offline_wsi_batch_remote.lock' \
+  --exclude '.~lock.*' \
+  --exclude 'data/TUM_Uterus_name_mapping.xlsx' \
+  --exclude 'data/*.xlsx' \
   "${LOCAL_REPO_ROOT}/" "${CLUSTER_SSH_HOST}:${PINNED_REPO}/"
 
 _cluster_ssh "chmod +x '${PINNED_REPO}/scripts/cluster/'*.sh '${PINNED_REPO}/scripts/local/'*.sh 2>/dev/null || true"

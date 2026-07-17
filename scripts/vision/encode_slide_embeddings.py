@@ -73,23 +73,49 @@ def encode_one_slide(
         write_thumbnail(svs_path, out_dir / "thumbnail.png", max_edge_px=max_edge_px)
 
     coord_path = out_dir / "coords_20x.pt"
+    meta_20 = out_dir / "meta_20x.json"
+    canonical_emb = out_dir / "patch_embeddings_20x.pt"
+    patch_emb: np.ndarray | None = None
+    patches: list = []
+    encode_coords: list[tuple[int, int]] = []
     patch_size_lv0 = 0
-    if coord_path.exists():
-        coords = load_coords_from_pt(coord_path)
-        meta_20 = out_dir / "meta_20x.json"
-        if meta_20.exists():
-            patch_size_lv0 = int(json.loads(meta_20.read_text()).get("patch_size_lv0", 0))
+    sampling_mode = ""
+    sampling_meta: dict = {}
+
+    if meta_20.exists():
+        patch_size_lv0 = int(json.loads(meta_20.read_text()).get("patch_size_lv0", 0))
+
+    if canonical_emb.exists():
+        data = torch.load(canonical_emb, map_location="cpu", weights_only=False)
+        if isinstance(data, dict):
+            patch_emb = np.asarray(data["embeddings"], dtype=np.float32)
+            coords_arr = np.asarray(data.get("coords", []), dtype=np.int64)
+            if coords_arr.size:
+                encode_coords = [(int(x), int(y)) for x, y in coords_arr]
+        else:
+            patch_emb = np.asarray(data, dtype=np.float32)
+        if not encode_coords and coord_path.exists():
+            encode_coords = load_coords_from_pt(coord_path)
+        sampling_mode = "from_cache"
+        sampling_meta = {"n_patches_tiled": len(encode_coords)}
     else:
-        coords, patch_size_lv0 = extract_patch_coords(svs_path, mag_band="20x", max_patches=0)
+        if coord_path.exists():
+            coords = load_coords_from_pt(coord_path)
+        else:
+            coords, patch_size_lv0 = extract_patch_coords(
+                svs_path, mag_band="20x", max_patches=0
+            )
+        encode_coords, sampling_mode, sampling_meta = coords_for_encode(
+            coords, patch_size_lv0=patch_size_lv0, max_patches=max_patches
+        )
 
-    encode_coords, sampling_mode, sampling_meta = coords_for_encode(
-        coords, patch_size_lv0=patch_size_lv0, max_patches=max_patches
-    )
     if not encode_coords:
-        raise RuntimeError(f"No tissue patches extracted from {svs_path}")
+        raise RuntimeError(f"No tissue patches for slide embedding on {svs_path}")
 
-    patches = load_patches_from_coords(svs_path, encode_coords, mag_band="20x")
-    patch_emb = encoder.encode_patches(patches, batch_size=batch_size)
+    if patch_emb is None:
+        patches = load_patches_from_coords(svs_path, encode_coords, mag_band="20x")
+        patch_emb = encoder.encode_patches(patches, batch_size=batch_size)
+
     slide_emb = encoder.encode_slide(
         patch_emb,
         np.asarray(encode_coords, dtype=np.int64),
@@ -118,7 +144,9 @@ def encode_one_slide(
         "source": str(svs_path),
         "model_id": encoder.model_id,
         "n_patches": len(encode_coords),
-        "n_patches_tiled": sampling_meta.get("n_patches_tiled", len(coords)),
+        "n_patches_tiled": sampling_meta.get(
+            "n_patches_tiled", len(encode_coords)
+        ),
         "n_patches_encoded": len(encode_coords),
         "sampling_mode": sampling_mode,
         "patch_size_lv0": patch_size_lv0,

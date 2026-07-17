@@ -12,11 +12,19 @@ _MPP_BY_OBJECTIVE = {"5x": 2.0, "4x": 2.5, "10x": 1.0, "20x": 0.5, "40x": 0.25}
 
 
 def slide_id_from_path(svs_path: Path) -> str:
-    """Stable cache key from a .svs filename."""
-    return svs_path.name
+    """Canonical cache key: TUM_Uterus_XXXX.svs when mapped, else basename."""
+    from vision.wsi_mapping import canonical_slide_id
+
+    return canonical_slide_id(svs_path)
 
 
 def find_svs_files(data_dir: Path, *, limit: int = 0) -> list[Path]:
+    """List .svs paths. Prefers name-map order (464 TUM_Uterus ids) when CSV exists."""
+    from vision.wsi_mapping import resolve_mapped_wsi_files
+
+    mapped = resolve_mapped_wsi_files(data_dir, limit=limit)
+    if mapped is not None:
+        return mapped
     files = sorted(data_dir.rglob("*.svs"))
     if limit > 0:
         files = files[:limit]
@@ -30,11 +38,21 @@ def resolve_wsi_files(
     limit: int = 0,
     wsi_index: int | None = None,
 ) -> list[Path]:
-    """Resolve slide list; optional SLURM array index into sorted .svs files."""
+    """Resolve slide list; optional SLURM array index into the name map (not raw FS sort)."""
+    from vision.wsi_mapping import resolve_mapped_wsi_files
+
+    mapped = resolve_mapped_wsi_files(
+        data_dir, slide=slide, limit=limit, wsi_index=wsi_index
+    )
+    if mapped is not None:
+        return mapped
+
     if slide:
         files = sorted(data_dir.rglob(slide))
     else:
-        files = find_svs_files(data_dir, limit=limit)
+        files = sorted(data_dir.rglob("*.svs"))
+        if limit > 0:
+            files = files[:limit]
     if wsi_index is not None:
         if wsi_index < 0 or wsi_index >= len(files):
             raise IndexError(

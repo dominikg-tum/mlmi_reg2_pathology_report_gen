@@ -14,12 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 20x-only corpus (configs/vision.yaml encode_levels). K-means is optional ablation.
 REQUIRED = (
-    "patch_embeddings_10x.pt",
     "patch_embeddings_20x.pt",
-    "kmeans_centroids_10x.pt",
-    "kmeans_centroids_20x.pt",
-    "slide_embedding.pt",
 )
 
 MANIFEST_NAME = "wsi_svs_index_manifest.txt"
@@ -39,6 +36,16 @@ def _load_repo(repo: Path):
 def _write_manifest(manifest: Path, ids: list[str]) -> None:
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text("\n".join(ids) + "\n")
+
+
+def _slide_ids_from_name_map(repo: Path) -> list[str] | None:
+    from vision.wsi_mapping import mapped_slide_ids, name_map_available
+
+    csv_path = str(repo / "data" / "manifests" / "wsi_name_map.csv")
+    if not name_map_available(csv_path):
+        return None
+    ids = mapped_slide_ids(csv_path=csv_path)
+    return ids or None
 
 
 def _slide_ids_from_thumbnails(vcfg: dict) -> list[str] | None:
@@ -76,6 +83,16 @@ def _load_slide_ids(repo: Path) -> list[str]:
         ids = [line.strip() for line in manifest.read_text().splitlines() if line.strip()]
         if ids:
             return ids
+
+    ids = _slide_ids_from_name_map(repo)
+    if ids:
+        print(
+            f"Built wsi index manifest from wsi_name_map.csv ({len(ids)} slides).",
+            file=sys.stderr,
+            flush=True,
+        )
+        _write_manifest(manifest, ids)
+        return ids
 
     ids = _slide_ids_from_thumbnails(vcfg)
     if ids:

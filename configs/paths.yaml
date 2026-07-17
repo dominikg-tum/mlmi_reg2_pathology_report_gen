@@ -4,6 +4,9 @@ cluster:
   project_root: /mnt/projects/mlmi/reg2
   data_dir: /mnt/projects/mlmi/TUMUntera/TUM_Untera_data
   labels_xlsx: /mnt/projects/mlmi/reg2/case_reports_to_korea_collaborators.xlsx
+  # Repo-relative UUID ↔ TUM_Uterus_XXXX map (built from data/TUM_Uterus_name_mapping.xlsx)
+  name_map_csv: data/manifests/wsi_name_map.csv
+  name_mapping_xlsx: data/TUM_Uterus_name_mapping.xlsx
   models_dir: /mnt/projects/mlmi/reg2/models
   containers_dir: /mnt/projects/mlmi/reg2/containers
   repos_dir: /mnt/projects/mlmi/reg2/repos
@@ -13,17 +16,23 @@ cluster:
 
 user:
   name: dominik
-  work_dir: /mnt/projects/mlmi/reg2/dominik
+  # Personal workspace under TUMUntera (reg2/dominik is at NFS user quota ~8G from legacy cache).
+  work_dir: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer
   # Personal code deploy — rsync from laptop; SLURM jobs use this instead of team repo path
-  pinned_repo_dir: /mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen
-  logs_dir: /mnt/projects/mlmi/reg2/dominik/logs
+  pinned_repo_dir: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
+  logs_dir: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs
+  # Legacy multi-zoom / pre-§2k caches (leave untouched under old path)
   cache_dir: /mnt/projects/mlmi/reg2/dominik/cache
-  embeddings_dir: /mnt/projects/mlmi/reg2/dominik/embeddings
+  # Active CONCH 20x corpus — must match configs/vision.yaml cache_root
+  cache_20x_v2_dir: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2
+  embeddings_dir: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/embeddings
   enroot_name: dominik_mlmi
   # SLURM / enroot jobs — team base with vLLM + project deps
   container_sqsh: /mnt/projects/mlmi/reg2/containers/qwen25_dev_updated.sqsh
   # Optional: personal export after pip install + testing (dominik_20260529_base.sqsh)
   personal_container_sqsh: /mnt/projects/mlmi/reg2/containers/dominik_20260529_base.sqsh
+  # Old personal tree (quota-full; read-only use)
+  legacy_work_dir: /mnt/projects/mlmi/reg2/dominik
 
 repo:
   name: mlmi_reg2_pathology_report_gen

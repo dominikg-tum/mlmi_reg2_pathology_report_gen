@@ -1,5 +1,7 @@
-# Offline WSI caches — matches cluster user.cache_dir in configs/paths.yaml
-cache_root: /mnt/projects/mlmi/reg2/dominik/cache
+# Fresh 20x CONCH corpus (HSV + stratified encode). Legacy multi-zoom caches stay in
+# /mnt/projects/mlmi/reg2/dominik/cache — do not overwrite.
+# NOTE: reg2/dominik is at NFS user quota; active corpus lives under TUMUntera personal tree.
+cache_root: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2
 
 # ENCODER CONSTRAINT (locked): CONCHv1.5 via MahmoodLab/TITAN return_conch() only.
 # Requires paired text encoder for question-conditioned cosine sim retrieval.

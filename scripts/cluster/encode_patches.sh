@@ -6,9 +6,11 @@
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
-#SBATCH --array=0-459
+#SBATCH --array=0-463
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/encode_%A_%a.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/encode_%A_%a.err
+#
+# Levels come from configs/vision.yaml encode_levels (20x). Do not hardcode 5x/10x.
 
 set -euo pipefail
 
@@ -30,8 +32,5 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
 $(cluster_titan_pip_snippet)
 $(cluster_hf_login_snippet)
     python -m scripts.vision.encode_patches_offline \
-      --wsi-index '${SLURM_ARRAY_TASK_ID}' \
-      --level 5x \
-      --level 10x \
-      --level 20x
+      --wsi-index '${SLURM_ARRAY_TASK_ID}'
   "

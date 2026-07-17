@@ -1,81 +1,103 @@
-# Submit SLURM jobs from your laptop
+# Submit SLURM jobs from your laptop or cluster head
 
-Run offline WSI jobs using **your feature-branch code** without relying on the team shared repo checkout at `/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen`.
+Pinned code path (NFS quota-safe):
 
-## How it works
+`/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen`
 
-1. **Rsync** your local repo → `/mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen` (pinned path on NFS).
-2. **SSH** to `head` and `sbatch` `scripts/cluster/run_offline_wsi_pinned.sh`.
-3. Jobs still use the same **cache**, **logs**, and **data** paths (`configs/paths.yaml`).
+Cache (CONCH 20x): `/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2`
 
-Teammates can `git checkout main` on the shared repo — your pinned jobs are unaffected.
+**Done artifact per slide:** `patch_embeddings_20x.pt` (TITAN `slide_embedding.pt` is **off** by default).
 
-## One-time laptop setup
+---
 
-1. TUM VPN + SSH key to head (see `docs/cluster_setup.md` §6).
-2. Optional overrides in `scripts/local/cluster_env.local.sh`:
+## Run full batch without VPN (recommended)
 
-```bash
-CLUSTER_SSH_HOST="dominikgarstenauer@head.garching.camp.cluster"
-PINNED_REPO="/mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen"
-```
+The batch submitter must run **on the cluster head**, not your laptop.
 
-## Commands
+### Step 1 — Laptop terminal (VPN on, one time)
+
+Sync latest code:
 
 ```bash
-# Sync code only
+cd "/home/garstenauer/Documents/orga/other/MLMI REG2 PATH/mlmi_reg2_pathology_report_gen"
 bash scripts/local/sync_repo_to_cluster.sh
-
-# One slide
-bash scripts/local/submit_offline_wsi_remote.sh --wsi-index 117
-
-# Batch loop (after handoff — see below)
-bash scripts/local/submit_offline_wsi_batch_remote.sh --start 117 --end 459 --handoff
-
-# Status from laptop
-ssh dominikgarstenauer@head 'squeue -u dominikgarstenauer'
 ```
 
-## Automatic handoff (recommended)
+Stop any **laptop** batch submitter if still running (Ctrl+C in that terminal).
 
-When the cluster batch is still running but you want pinned code **without** duplicate slides:
+SSH to head:
 
 ```bash
-# Foreground (from laptop, VPN on)
-bash scripts/local/auto_handoff_wsi_batch.sh
-
-# Or detach
-nohup bash scripts/local/auto_handoff_wsi_batch.sh >> ~/wsi_handoff.log 2>&1 &
-tail -f ~/wsi_handoff.log
+ssh dominikgarstenauer@head.garching.camp.cluster
 ```
 
-What it does:
+### Step 2 — Head terminal (same SSH session)
 
-1. Reads **current** `wsi-offline-pipeline` job(s) from `squeue` (array task = wsi-index).
-2. **Immediately kills** `submit_offline_wsi_batch.sh` on head (so slide N+1 is never submitted on shared repo).
-3. **Waits** for the in-flight job to finish (does **not** `scancel` it).
-4. Rsyncs your laptop repo → pinned path.
-5. Scans NFS cache **once** on head for the first incomplete wsi-index (fast; no 460× `.svs` tree walks).
-6. Starts local batch from that index.
-
-Only **one** auto-handoff / batch-remote process at a time (file lock on laptop).
-
-This works on the Garching SLURM cluster — no special scheduler feature; only SSH + `squeue` polling.
-
-## Coexistence with cluster `submit_offline_wsi_batch.sh`
-
-| Situation | What to do |
-|-----------|------------|
-| **Cluster batch still running** (your current case) | Run **`auto_handoff_wsi_batch.sh`** from laptop when ready — or let cluster batch finish. |
-| **Worth switching mid-run?** | **Yes, with auto-handoff** — one in-flight job completes (~20 min), then pinned path takes over. |
-| **Ready to hand off manually** | Wait for current SLURM job to finish, then: `ssh head "pkill -f 'bash scripts/cluster/submit_offline_wsi_batch.sh'"`, then local batch with `--handoff --start N`. |
-| **Teammate breaks shared repo** | Running jobs keep going; **cluster batch's next slides** may break. After handoff, pinned path protects you. |
-
-**Adding these scripts does not stop or change the running cluster batch submitter** unless you start the local batch (with `--handoff`) or kill the cluster process yourself.
-
-## Monitoring without Cursor
+Kill stale locks / old laptop submitter if needed:
 
 ```bash
-ssh dominikgarstenauer@head 'squeue -u dominikgarstenauer'
-ssh dominikgarstenauer@head 'tail -20 /mnt/projects/mlmi/reg2/dominik/logs/offline_*_116.out'
+rm -f /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/locks/wsi_batch_local.lock
+pkill -f 'submit_offline_wsi_batch_remote' 2>/dev/null || true
+```
+
+Find first incomplete index (optional):
+
+```bash
+find /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2 -maxdepth 2 -name patch_embeddings_20x.pt | wc -l
+```
+
+Start detached batch submitter (replace `--start` with your count):
+
+```bash
+cd /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
+bash scripts/cluster/start_offline_wsi_batch_daemon.sh --start 0
+```
+
+You should see `Started batch submitter pid=...` and a log path.
+
+### Step 3 — Disconnect VPN
+
+Safe now. SLURM GPU jobs and the head-node submitter keep running.
+
+### Step 4 — Monitor later (VPN on again, any terminal)
+
+```bash
+ssh dominikgarstenauer@head.garching.camp.cluster
+tail -f /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/wsi_batch_submitter.log
+squeue -u dominikgarstenauer -n wsi-offline-pipeline
+find /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2 -name patch_embeddings_20x.pt | wc -l
+```
+
+---
+
+## One slide smoke test (laptop + VPN)
+
+```bash
+bash scripts/local/submit_offline_wsi_remote.sh --wsi-index 0
+```
+
+---
+
+## Laptop batch (needs VPN the whole time)
+
+Only use if head daemon is **not** running:
+
+```bash
+bash scripts/local/submit_offline_wsi_batch_remote.sh --handoff --start 0
+```
+
+---
+
+## Optional: TITAN slide embedding (Phase 2)
+
+Not run in the default pipeline. To add later for one slide:
+
+```bash
+python -m scripts.vision.encode_slide_embeddings --wsi-index N
+```
+
+Or full pipeline with slide emb:
+
+```bash
+python -m scripts.preprocess.run_offline_wsi --wsi-index N --with-slide-emb
 ```

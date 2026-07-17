@@ -1,4 +1,4 @@
-"""Unified offline WSI preprocessing: tile → verify → encode → kmeans → slide emb."""
+"""Unified offline WSI preprocessing: tile → verify → CONCH encode → kmeans (optional)."""
 
 from __future__ import annotations
 
@@ -22,19 +22,19 @@ def _validate_artifacts(
     svs_files: list[Path],
     *,
     levels: list[str] | None = None,
+    require_slide_embedding: bool = False,
 ) -> None:
-    """Exit non-zero if required 10x/20x offline artifacts are missing (5x optional)."""
+    """Exit non-zero if required encode_levels patch embeddings are missing."""
     levels = levels or default_encode_levels()
-    required_levels = [lv for lv in ("10x", "20x") if lv in levels]
     missing: list[str] = []
     for svs_path in svs_files:
         sid = slide_id_from_path(svs_path)
         out_dir = slide_cache_dir(cache_root, sid)
-        for lv in required_levels:
-            for stem in (f"patch_embeddings_{lv}.pt", f"kmeans_centroids_{lv}.pt"):
-                if not (out_dir / stem).exists():
-                    missing.append(f"{sid}/{stem}")
-        if not (out_dir / "slide_embedding.pt").exists():
+        for lv in levels:
+            emb = f"patch_embeddings_{lv}.pt"
+            if not (out_dir / emb).exists():
+                missing.append(f"{sid}/{emb}")
+        if require_slide_embedding and not (out_dir / "slide_embedding.pt").exists():
             missing.append(f"{sid}/slide_embedding.pt")
     if missing:
         raise SystemExit(
@@ -65,7 +65,7 @@ def _common_args(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run full offline WSI pipeline (tile → verify → encode → kmeans → slide emb)."
+        description="Run offline WSI pipeline (tile → verify → CONCH encode → kmeans)."
     )
     parser.add_argument("--slide", type=str, default="")
     parser.add_argument("--wsi-index", type=int, default=None)
@@ -75,7 +75,16 @@ def main() -> None:
     parser.add_argument("--skip-verify", action="store_true")
     parser.add_argument("--skip-encode", action="store_true")
     parser.add_argument("--skip-kmeans", action="store_true")
-    parser.add_argument("--skip-slide-emb", action="store_true")
+    parser.add_argument(
+        "--with-slide-emb",
+        action="store_true",
+        help="Also run TITAN slide_embedding.pt (Phase 2 / ablation; not needed for CONCH retrieve)",
+    )
+    parser.add_argument(
+        "--skip-slide-emb",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--verify-level", choices=["5x", "10x", "20x", "40x"], default="20x")
     args = parser.parse_args()
 
@@ -118,13 +127,19 @@ def main() -> None:
     if not args.skip_kmeans:
         _run_module("scripts.vision.build_kmeans_index", common + level_args)
 
-    if not args.skip_slide_emb:
+    run_slide_emb = args.with_slide_emb and not args.skip_slide_emb
+    if run_slide_emb:
         _run_module("scripts.vision.encode_slide_embeddings", common)
 
     svs_files = resolve_wsi_files(
         data_dir, slide=args.slide, wsi_index=args.wsi_index
     )
-    _validate_artifacts(cache_root, svs_files, levels=levels)
+    _validate_artifacts(
+        cache_root,
+        svs_files,
+        levels=levels,
+        require_slide_embedding=run_slide_emb,
+    )
     print(f"Offline pipeline complete -> {cache_root}")
 
 

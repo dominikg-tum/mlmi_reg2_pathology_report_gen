@@ -6,9 +6,17 @@
 #   2. Or add export HF_TOKEN=... to ~/.bashrc (also parsed when bashrc skips non-interactive shells)
 
 CLUSTER_REPO="/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen"
+# Prefer laptop-synced pinned tree when present (reg2/dominik may be quota-full).
+PINNED_REPO_DEFAULT="/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen"
 
 _cluster_paths_repo() {
-  echo "${CLUSTER_REPO}"
+  if [[ -n "${MLMI_PINNED_REPO:-}" && -f "${MLMI_PINNED_REPO}/configs/paths.yaml" ]]; then
+    echo "${MLMI_PINNED_REPO}"
+  elif [[ -f "${PINNED_REPO_DEFAULT}/configs/paths.yaml" ]]; then
+    echo "${PINNED_REPO_DEFAULT}"
+  else
+    echo "${CLUSTER_REPO}"
+  fi
 }
 
 # Load HF_TOKEN and other user exports for non-interactive SLURM jobs.

@@ -3,11 +3,12 @@
 # Override via environment or copy to cluster_env.local.sh (gitignored pattern: *.local.sh).
 
 CLUSTER_SSH_HOST="${CLUSTER_SSH_HOST:-dominikgarstenauer@head.garching.camp.cluster}"
-PINNED_REPO="${PINNED_REPO:-/mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen}"
+# Default under TUMUntera: reg2/dominik is NFS-quota-full from legacy cache.
+PINNED_REPO="${PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
 SHARED_REPO="${SHARED_REPO:-/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen}"
-REMOTE_LOGS_DIR="${REMOTE_LOGS_DIR:-/mnt/projects/mlmi/reg2/dominik/logs}"
-REMOTE_CACHE_DIR="${REMOTE_CACHE_DIR:-/mnt/projects/mlmi/reg2/dominik/cache}"
-REMOTE_LOCK_FILE="${REMOTE_LOCK_FILE:-/mnt/projects/mlmi/reg2/dominik/locks/wsi_batch_local.lock}"
+REMOTE_LOGS_DIR="${REMOTE_LOGS_DIR:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs}"
+REMOTE_CACHE_DIR="${REMOTE_CACHE_DIR:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2}"
+REMOTE_LOCK_FILE="${REMOTE_LOCK_FILE:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/locks/wsi_batch_local.lock}"
 
 # students_opportunistic: MaxJobs=2 total per user (includes cursor-ssh, wsi-offline, etc.).
 MAX_USER_JOBS="${MAX_USER_JOBS:-2}"
