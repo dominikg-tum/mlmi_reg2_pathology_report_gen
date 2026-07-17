@@ -4,8 +4,8 @@ Phases **1, 2, 4** only (no Phase 3 / ABMIL).
 
 | Phase | Capability |
 |-------|------------|
-| **1** | CONCHv1.5 at **5×/10×/20×/40×** (variable native patch px → 224 CONCH input) → `patch_embeddings_{zoom}.pt`; CONCH text×vision cosine; `node.zoom_level` + `description` |
-| **2** | Config-driven adjacent-scale parents (`40x→20x`, `20x→10x`, `10x→5x`); optional grandparent for integration/report nodes |
+| **1** | CONCHv1.5 at **20× only** → `patch_embeddings_20x.pt`; CONCH text×vision cosine over fixed pool; `node.zoom_level` is an ontology hint only |
+| **2** | Adjacent-scale parents are disabled by default; coarse context is provided by attaching the whole-slide thumbnail |
 | **4** | Spatial diversity filter (`d_min_20x_px` from `configs/vision.yaml`) |
 
 ## Offline pipeline (cluster order)
@@ -38,4 +38,4 @@ python -m baselines.run_agent \
   --slide-id YOUR.svs
 ```
 
-`graph_guided` passes `node.zoom_level` → `embeddings_{band}.pt` (separate pool per magnification; not a flat pool).
+`graph_guided` uses `retrieval.fixed_pool` (default `20x`) and loads `patch_embeddings_20x.pt` regardless of `node.zoom_level`.

@@ -21,3 +21,4 @@ def test_build_report_prompt_includes_chain():
     assert "Organ?" in prompt
     assert "uterus" in prompt
     assert "CAP-format" in prompt
+    assert "Do not define medical terms" in prompt

@@ -9,6 +9,14 @@ from typing import Any
 import numpy as np
 
 
+REPORT_RULES_ADDENDUM = """Rules:
+- State only findings supported by the diagnostic chain and specimen.
+- Do not define medical terms or explain basic pathology vocabulary.
+- Write observable slide-level results (what is present/absent, grade, extent), not textbook definitions.
+- CAP-style concise prose; do not mention answer keys or internal reasoning steps.
+"""
+
+
 class SlideProjector:
     """Linear map slide_emb (1024) → model hidden dim (4096). Untrained by default."""
 
@@ -83,6 +91,7 @@ def build_report_prompt(
         f"{prefix_note}\n"
         "Diagnostic chain:\n"
         f"{summary}\n\n"
+        f"{REPORT_RULES_ADDENDUM}\n"
         "Write the final pathology report:"
     )
 

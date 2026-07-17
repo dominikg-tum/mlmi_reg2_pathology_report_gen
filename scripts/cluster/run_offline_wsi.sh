@@ -6,7 +6,7 @@
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
 #SBATCH --time=06:00:00
-#SBATCH --array=0-459
+#SBATCH --array=0-463
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.err
 

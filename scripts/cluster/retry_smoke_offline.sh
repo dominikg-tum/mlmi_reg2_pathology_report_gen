@@ -45,15 +45,17 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 sys.path.insert(0, str(repo))
-from scripts.vision._common import default_cache_root, default_data_dir, load_vision_config
+from scripts.vision._common import default_cache_root, load_vision_config
 from vision.cache import slide_cache_dir
-from vision.wsi_io import resolve_wsi_files, slide_id_from_path
+from vision.wsi_mapping import mapped_slide_ids
 
 vcfg = load_vision_config()
-data_dir = default_data_dir()
 cache_root = default_cache_root(vcfg)
-svs = resolve_wsi_files(data_dir, wsi_index=int(sys.argv[2]))[0]
-sid = slide_id_from_path(svs)
+ids = mapped_slide_ids()
+idx = int(sys.argv[2])
+if idx < 0 or idx >= len(ids):
+    raise SystemExit(f"slide_index={idx} out of range for {len(ids)} mapped slides")
+sid = ids[idx]
 print(sid)
 print(slide_cache_dir(cache_root, sid))
 PY
@@ -62,12 +64,9 @@ PY
 SLIDE_ID="${_RESOLVED[0]}"
 SLIDE_CACHE_DIR="${_RESOLVED[1]}"
 
+# 20x CONCH only — TITAN slide_embedding.pt is optional (Phase 2).
 REQUIRED=(
-  patch_embeddings_10x.pt
   patch_embeddings_20x.pt
-  kmeans_centroids_10x.pt
-  kmeans_centroids_20x.pt
-  slide_embedding.pt
 )
 
 clear_failed_markers() {

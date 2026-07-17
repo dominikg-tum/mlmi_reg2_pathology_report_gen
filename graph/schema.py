@@ -61,6 +61,7 @@ class Node:
     node_kind: NodeKind
     interaction: InteractionType
     description: str = ""
+    spatial_policy: str = ""
     options: list[str] = field(default_factory=list)
     edges: dict[str, str] = field(default_factory=dict)
     zoom_level: ZoomLevel = ZoomLevel.X20
@@ -81,6 +82,26 @@ class Node:
         d = self.description.strip()
         return f"{q} {d}".strip() if d else q
 
+    def retrieval_text_with_context(
+        self,
+        prior_steps: list[tuple[str, str]] | None = None,
+        *,
+        sub_query: str = "",
+    ) -> str:
+        """CONCH query with optional chain summary and ReAct sub_query.
+
+        Used at inference for spatial nodes and ReAct re-retrieve:
+        ``encode_text(node.retrieval_text_with_context(steps, sub_query=I_t))``
+        """
+        parts = [self.retrieval_text]
+        if prior_steps:
+            summary = "; ".join(f"{nid}={ans}" for nid, ans in prior_steps[-4:])
+            parts.append(f"Prior findings: {summary}.")
+        sq = sub_query.strip()
+        if sq:
+            parts.append(sq)
+        return " ".join(parts).strip()
+
     @property
     def retrieval_level_str(self) -> str:
         """Backward compat alias — retrievers select embeddings_{mag_band}.pt."""
@@ -91,6 +112,8 @@ class Node:
             return None
         if self.interaction == InteractionType.MULTI_SELECT:
             return self.edges.get("__default__") or self.edges.get(answer)
+        if self.interaction == InteractionType.FREE_TEXT:
+            return self.edges.get("__default__")
         if answer not in self.edges:
             raise KeyError(
                 f"Answer {answer!r} not a valid edge of node {self.id!r}. "

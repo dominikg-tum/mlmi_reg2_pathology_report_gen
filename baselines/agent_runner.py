@@ -14,6 +14,7 @@ from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
 from agent.types import Step
 from vision.cache import SlideCache, build_slide_cache
+from vision.thumbnail import _resolve_wsi_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,6 +54,19 @@ class AgentRunResult:
     retrieval_log: list[dict[str, Any]]
 
 
+def resolve_search_all_patches(
+    *,
+    kmeans_pool: bool = False,
+    search_all_patches: bool = False,
+) -> bool | None:
+    """CLI override for retrieval pool. None → configs/vision.yaml default."""
+    if kmeans_pool:
+        return False
+    if search_all_patches:
+        return True
+    return None
+
+
 def run_agent_traversal(
     *,
     backend: str = "dummy",
@@ -64,7 +78,10 @@ def run_agent_traversal(
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
     skip_report_nodes: bool = False,
-    search_all_patches: bool = False,
+    search_all_patches: bool | None = None,
+    node_react: bool = False,
+    structured_answer: bool = False,
+    paired_regions: bool = False,
 ) -> AgentRunResult:
     cfg = load_paths_config()
     wsi_data_dir = wsi_data_dir or Path(cfg["cluster"]["data_dir"])
@@ -76,6 +93,11 @@ def run_agent_traversal(
         build_slide_cache(cache_root, slide_id) if slide_id and cache_root else None
     )
 
+    # Resolve on-disk WSI so node_react zoom / return_images can attach patch PNGs.
+    wsi_path = _resolve_wsi_path(
+        slide_cache, wsi_path=None, wsi_data_dir=wsi_data_dir
+    )
+
     retrieval_log: list[dict[str, Any]] = []
     steps = traverse(
         answer_backend,
@@ -85,10 +107,14 @@ def run_agent_traversal(
         retriever_method=retriever,
         navigator_method=navigator,
         cache_root=cache_root,
+        wsi_path=wsi_path,
         wsi_data_dir=wsi_data_dir,
         skip_report_nodes=skip_report_nodes,
         search_all_patches=search_all_patches,
         retrieval_log=retrieval_log,
+        node_react=node_react,
+        structured_answer=structured_answer,
+        paired_regions=paired_regions,
     )
     chain = chain_to_dict(
         steps,
@@ -113,6 +139,9 @@ def write_phase1_outputs(
     out_dir.mkdir(parents=True, exist_ok=True)
     chain_path = out_dir / "cot_chain.json"
     chain_path.write_text(json.dumps(result.chain, indent=2) + "\n")
+    report = str(result.chain.get("report", "") or "").strip()
+    if report:
+        (out_dir / "report.txt").write_text(report + "\n")
     if result.retrieval_log:
         (out_dir / "retrieval_log.json").write_text(
             json.dumps(result.retrieval_log, indent=2) + "\n"

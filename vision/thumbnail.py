@@ -6,7 +6,8 @@ from pathlib import Path
 
 from graph.schema import Node, VisualPolicy
 from vision.backends import VisualBundle
-from vision.cache import SlideCache
+from vision.cache import SlideCache, resolve_thumbnail_path
+from vision.mag_config import fixed_retrieval_pool
 def _resolve_wsi_path(
     slide_cache: SlideCache | None,
     *,
@@ -26,10 +27,15 @@ def _bundle_from_retrieved(
     slide_cache: SlideCache,
     *,
     out_subdir: str = "retrieved",
+    cache_root: Path | None = None,
 ) -> VisualBundle:
     bundle = VisualBundle(metadata={"visual": "patch_retrieve"})
     if slide_cache.thumbnail_path:
         bundle.thumbnail_path = slide_cache.thumbnail_path
+    elif cache_root is not None:
+        thumb = resolve_thumbnail_path(cache_root, slide_cache.slide_id)
+        if thumb is not None:
+            bundle.thumbnail_path = thumb
 
     out_dir = (slide_cache.cache_dir or Path(".")) / out_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -103,13 +109,18 @@ class ThumbnailProvider:
                 retrieved = retriever.retrieve(
                     node.retrieval_text,
                     slide_cache,
-                    level=node.mag_band,
+                    level=fixed_retrieval_pool(),
                     wsi_path=wsi,
                     return_images=wsi is not None,
                     tier=node.tier.value,
                     node_kind=node.node_kind.value,
                 )
-                patch_bundle = _bundle_from_retrieved(retrieved, slide_cache, out_subdir="retrieved_both")
+                patch_bundle = _bundle_from_retrieved(
+                    retrieved,
+                    slide_cache,
+                    out_subdir="retrieved_both",
+                    cache_root=self.cache_root,
+                )
                 bundle.patch_paths = patch_bundle.patch_paths
                 bundle.metadata.update(patch_bundle.metadata)
             except (RuntimeError, NotImplementedError, FileNotFoundError):
@@ -155,10 +166,10 @@ class PatchRetrieveProvider:
         retrieved = retriever.retrieve(
             node.retrieval_text,
             slide_cache,
-            level=node.mag_band,
+            level=fixed_retrieval_pool(),
             wsi_path=wsi,
             return_images=wsi is not None,
             tier=node.tier.value,
             node_kind=node.node_kind.value,
         )
-        return _bundle_from_retrieved(retrieved, slide_cache)
+        return _bundle_from_retrieved(retrieved, slide_cache, cache_root=self.cache_root)

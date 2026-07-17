@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agent.types import Step
@@ -93,6 +94,55 @@ class ZeroShotQwenBackend:
         answer = (choice.message.content or "").strip()
         confidence = _first_token_prob(choice)
         return answer, confidence
+
+    def complete_json(
+        self,
+        node: Node,
+        visual: VisualBundle | None,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        guided_choice: list[str] | None = None,
+    ) -> tuple[dict[str, Any], float, str]:
+        image_paths = _visual_image_paths(visual)
+        content = build_user_content(user_prompt, image_paths)
+
+        extra_body: dict[str, Any] = {}
+        if guided_choice:
+            extra_body["guided_choice"] = guided_choice
+
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            temperature=0.0,
+            logprobs=True,
+            extra_body=extra_body or None,
+        )
+        choice = resp.choices[0]
+        raw = (choice.message.content or "").strip()
+        confidence = _first_token_prob(choice)
+
+        # Soft-fail on malformed JSON so traverse/node_react can retry the node
+        # instead of aborting the whole diagnostic chain.
+        parsed: dict[str, Any] = {}
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    parsed = json.loads(raw[start : end + 1])
+                except Exception:
+                    parsed = {}
+            else:
+                parsed = {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        return parsed, confidence, raw
 
 
 def _visual_prompt_note(visual: VisualBundle | None) -> str:

@@ -22,22 +22,26 @@ It does **not** run at agent inference time. Retrieval and CMT adjacent-scale en
 
 | Item | Detail |
 |------|--------|
-| Location | `vision/wsi_io.py` → `is_tissue_patch()`; called from `iter_tissue_patches()` |
-| Rule | Keep patch if **grayscale mean ≤ 220** (RGB averaged per pixel, then mean over patch) |
-| Config | **None** — threshold hardcoded; not in `configs/vision.yaml` |
-| Docs | Previously undocumented |
-| Scope | All four zoom levels use the same per-patch check during tiling |
+| Location | `vision/tissue_mask.py` + `vision/patching.py` → `iter_tissue_patches()` |
+| Default rule | **Slide-level HSV mask** on openslide thumbnail; keep patch iff `tissue_fraction >= min_tissue_fraction` (default **0.40**) |
+| Config | `configs/vision.yaml` → `tissue_filter` block |
+| Artifacts | `tissue_mask.png` per slide cache dir (saved by `tile_slides.py`) |
+| Legacy | `method: mean_threshold` still available — grayscale mean ≤ 220 |
 
-```python
-# vision/wsi_io.py (current)
-def is_tissue_patch(arr, background_threshold=220) -> bool:
-    gray = arr.mean(axis=2) if arr.ndim == 3 else arr
-    return float(gray.mean()) <= background_threshold
+```yaml
+# configs/vision.yaml (shipped)
+tissue_filter:
+  method: slide_mask
+  min_tissue_fraction: 0.40
+  hsv_sat_min: 0.08
+  hsv_val_max: 0.95
+  morph_close_px: 5
+  background_threshold: 220   # mean_threshold fallback only
 ```
 
-**Strengths:** trivial, fast, no extra dependencies, works on pure-glass tiles.
+**Strengths:** per-slide adaptive mask, handles edge patches, shared across zoom levels, visual QA via `tissue_mask.png`.
 
-**Weaknesses:**
+**Weaknesses (monitor on pilot slides):**
 
 | Failure mode | Example |
 |--------------|---------|
@@ -131,18 +135,10 @@ Add to `configs/vision.yaml`:
 ```yaml
 tissue_filter:
   method: slide_mask          # slide_mask | mean_threshold | dark_fraction
-  mask_source: thumbnail      # thumbnail | openslide_lowres
-  min_tissue_fraction: 0.40
-  hsv_sat_min: 0.08
-  hsv_val_max: 0.95
-  morph_close_px: 5           # 0 = disable
-  # Legacy fallback (method: mean_threshold)
-  background_threshold: 220
-  # Quick win (method: dark_fraction)
-  dark_fraction_min: 0.25
+  ...
 ```
 
-Keep `mean_threshold` as legacy until re-tiling is validated — existing caches stay reproducible.
+**Status:** `slide_mask` is now the **shipped default** (see §2 above). `mean_threshold` remains for ablation / legacy cache comparison.
 
 ---
 
@@ -150,12 +146,13 @@ Keep `mean_threshold` as legacy until re-tiling is validated — existing caches
 
 | File | Change |
 |------|--------|
-| `vision/tissue_mask.py` | **New** — build mask from thumbnail, scale to level-0, overlap query |
-| `vision/wsi_io.py` | `iter_tissue_patches()` — call mask overlap or legacy threshold from config |
-| `vision/mag_config.py` | `tissue_filter_config()` helper |
-| `configs/vision.yaml` | `tissue_filter` block above |
-| `scripts/vision/verify_tiling.py` | Mask overlay montage + patch count vs legacy |
-| `scripts/vision/tile_slides.py` | Save `tissue_mask.png` per slide cache dir |
+| `vision/tissue_mask.py` | **Done** — build mask from thumbnail, scale to level-0, overlap query |
+| `vision/wsi_io.py` | **Done** — `iter_tissue_patches()` accepts custom `accept_patch` predicate |
+| `vision/patching.py` | **Done** — wires `tissue_filter` config into tiling |
+| `vision/mag_config.py` | **Done** — `tissue_filter_config()` helper |
+| `configs/vision.yaml` | **Done** — `tissue_filter` block |
+| `scripts/vision/verify_tiling.py` | Mask overlay montage + patch count vs legacy (optional) |
+| `scripts/vision/tile_slides.py` | **Done** — saves `tissue_mask.png` per slide cache dir |
 
 No changes to retrieval, agent inference, or CMT adjacent-scale logic.
 
@@ -181,7 +178,7 @@ Tune `min_tissue_fraction` down to **0.30** if pale compartments are over-filter
 | Best robust method for this project? | **Slide-level HSV tissue mask + `min_tissue_fraction` per patch** |
 | Use Otsu? | **Once on thumbnail**, optional fallback — not per patch |
 | Use deep segmentation? | **No** unless mask QA fails on many slides |
-| Keep current mean-220? | **Legacy fallback only** until re-tile validated |
+| Keep current mean-220? | **`mean_threshold` fallback** — re-tile corpus to pick up `slide_mask` default |
 | Quick win without mask plumbing? | **Dark-pixel fraction** — better edges, still not slide-adaptive |
 
 ---

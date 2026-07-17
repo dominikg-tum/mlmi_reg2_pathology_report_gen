@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from graph.schema import (
-    InteractionType, Node, NodeKind, RetrievalLevel, Tier, VisualPolicy,
+    InteractionType,
+    Node,
+    NodeKind,
+    Tier,
+    VisualPolicy,
+    ZoomLevel,
 )
 from memory.hybridrag import HybridRAGMemory
 
@@ -15,11 +20,12 @@ EXCEL_PATH = Path(__file__).parent.parent / "memory" / "case_reports_to_korea_co
 
 
 def make_node(
-        node_id: str,
-        question: str,
-        tier: Tier,
-        retrieval_level: RetrievalLevel = RetrievalLevel.MEDIUM,
-        node_kind: NodeKind = NodeKind.LOCAL) -> Node:
+    node_id: str,
+    question: str,
+    tier: Tier,
+    zoom_level: ZoomLevel = ZoomLevel.X10,
+    node_kind: NodeKind = NodeKind.LOCAL,
+) -> Node:
     return Node(
         id=node_id,
         label=node_id.replace("_", " ").title(),
@@ -27,7 +33,7 @@ def make_node(
         tier=tier,
         node_kind=node_kind,
         interaction=InteractionType.FREE_TEXT,
-        retrieval_level=retrieval_level,
+        zoom_level=zoom_level,
         visual_policy=VisualPolicy.PATCH_RETRIEVE,
     )
 
@@ -48,23 +54,41 @@ def memory() -> HybridRAGMemory:
 
 RETRIEVAL_CASES: list[tuple[Node, str]] = [
     (
-        make_node("organ", "What organ does this biopsy originate from?",
-                  Tier.GLOBAL_FEATURES, RetrievalLevel.LOW, NodeKind.GLOBAL),
+        make_node(
+            "organ",
+            "What organ does this biopsy originate from?",
+            Tier.GLOBAL_FEATURES,
+            ZoomLevel.X5,
+            NodeKind.GLOBAL,
+        ),
         "uterus endometrium biopsy tissue",
     ),
     (
-        make_node("nuclear_atypia", "Is there nuclear atypia present?",
-                  Tier.LOCAL_FEATURES, RetrievalLevel.HIGH),
+        make_node(
+            "nuclear_atypia",
+            "Is there nuclear atypia present?",
+            Tier.LOCAL_FEATURES,
+            ZoomLevel.X40,
+        ),
         "WT1 P40 expression nuclear atypia",
     ),
     (
-        make_node("mitotic_activity", "What is the mitotic activity?",
-                  Tier.LOCAL_FEATURES, RetrievalLevel.HIGH),
+        make_node(
+            "mitotic_activity",
+            "What is the mitotic activity?",
+            Tier.LOCAL_FEATURES,
+            ZoomLevel.X40,
+        ),
         "mitotic figures per 10 HPF high power field",
     ),
     (
-        make_node("final_diagnosis", "What is the final diagnosis?",
-                  Tier.INTEGRATION, RetrievalLevel.HIGH, NodeKind.INTEGRATION),
+        make_node(
+            "final_diagnosis",
+            "What is the final diagnosis?",
+            Tier.INTEGRATION,
+            ZoomLevel.X40,
+            NodeKind.INTEGRATION,
+        ),
         "leiomyoma leiomyosarcoma endometrial carcinoma diagnosis",
     ),
 ]
@@ -73,7 +97,7 @@ RETRIEVAL_CASES: list[tuple[Node, str]] = [
 def test_guard_raises() -> None:
     fresh = HybridRAGMemory()
     node = make_node("test", "test?", Tier.GLOBAL_FEATURES)
-    with pytest.raises(RuntimeError, match="build_index"):
+    with pytest.raises(RuntimeError, match="build_hybridrag_index"):
         fresh.retrieve(node, "test query")
 
 
@@ -91,8 +115,8 @@ def test_retrieve_returns_results(memory: HybridRAGMemory, node: Node, query: st
 
 
 def test_retrieve_low_level_returns_fewer_docs(memory: HybridRAGMemory) -> None:
-    low_node = make_node("organ", "What organ?", Tier.GLOBAL_FEATURES, RetrievalLevel.LOW)
-    high_node = make_node("atypia", "Is there atypia?", Tier.LOCAL_FEATURES, RetrievalLevel.HIGH)
+    low_node = make_node("organ", "What organ?", Tier.GLOBAL_FEATURES, ZoomLevel.X5)
+    high_node = make_node("atypia", "Is there atypia?", Tier.LOCAL_FEATURES, ZoomLevel.X40)
 
     low_result = memory.retrieve(low_node, "biopsy organ", k=4)
     high_result = memory.retrieve(high_node, "nuclear atypia", k=4)
@@ -105,6 +129,9 @@ def test_retrieve_low_level_returns_fewer_docs(memory: HybridRAGMemory) -> None:
 
 
 def test_force_rebuild(tmp_path) -> None:
+    if not EXCEL_PATH.exists():
+        pytest.skip(f"Excel data file not found at '{EXCEL_PATH}'")
+
     isolated_memory = HybridRAGMemory(chroma_storage=str(tmp_path / "chroma_rebuild_test"))
 
     isolated_memory.build_index(str(EXCEL_PATH), split="train")
@@ -113,8 +140,12 @@ def test_force_rebuild(tmp_path) -> None:
     isolated_memory.build_index(str(EXCEL_PATH), force_rebuild=True)
     assert isolated_memory.ensemble_retriever is not None
 
-    node = make_node("post_rebuild", "Is there any abnormality?",
-                     Tier.LOCAL_FEATURES, RetrievalLevel.MEDIUM)
+    node = make_node(
+        "post_rebuild",
+        "Is there any abnormality?",
+        Tier.LOCAL_FEATURES,
+        ZoomLevel.X10,
+    )
     results = isolated_memory.retrieve(node, "abnormality tissue", k=2)
 
     assert results, "Retrieval broken after force_rebuild"

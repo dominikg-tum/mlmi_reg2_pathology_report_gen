@@ -12,8 +12,8 @@
 |-----------|-------|
 | Dataset | ~220 WSIs (150 train+val / 70 test) under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` |
 | Offline backbone | CONCHv1.5 (`MahmoodLab/CONCH`, 768-d) + TITAN slide encoder (`MahmoodLab/TITAN`, 1024-d) |
-| Tiling (locked) | **Four zoom levels**, non-overlapping native patch sizes → resize to **224×224** before CONCH encode |
-| Agent workflow | Graph Q&A → **`node.zoom_level`** → load `patch_embeddings_{tier}.pt` → **K-means centroid pool (default)** → `TitanEncoder.encode_text()` cosine → raw patches → VLM |
+| Tiling (locked) | **20× only** offline patch pool (512×512 native) → resize to **224×224** before CONCH encode |
+| Agent workflow | Graph Q&A → **fixed 20× retrieval pool** (`patch_embeddings_20x.pt`) → `TitanEncoder.encode_text()` cosine → raw patches (+ thumbnail) → VLM; `node.zoom_level` is an ontology hint only |
 | Report stage | **MedGemma 1.5 4B** chain-only baseline today; optional slide context via native images or trained TITAN adapter (Phase 2) — see [PROJECT_OVERVIEW.md §2e](PROJECT_OVERVIEW.md#2e-images-vs-embeddings--when-to-use-what) |
 | Thumbnail baseline | **Done on cluster** — `/mnt/projects/mlmi/reg2/dataset/thumbnails/` |
 | Hardware | 1× A100-80G or 2× A100-40G |
@@ -22,16 +22,15 @@
 
 ## 1. Patch Size & Zoom Level
 
-### Primary path — `zoom_level` on every graph node
+### Primary path — fixed 20× retrieval pool
 
-Each node carries **`zoom_level`**: `"5x"`, `"10x"`, `"20x"`, or `"40x"`. At inference the agent loads **`patch_embeddings_{tier}.pt`** for that WSI — never a single flat pool.
+At inference, **all patch-retrieve nodes** rank the same offline pool: `patch_embeddings_20x.pt`. The graph still stores `zoom_level` for readability and prompt hints, but it does not route caches.
 
 | `zoom_level` | Native tile (non-overlap) | CONCH input | Artifact | Typical use | top-k |
 |--------------|---------------------------|-------------|----------|-------------|-------|
-| **`5x`** | 2048×2048 | 224×224 | `patch_embeddings_5x.pt` | Global architecture | **3** |
-| **`10x`** | 1024×1024 | 224×224 | `patch_embeddings_10x.pt` | Compartment, gross pattern | **3** |
-| **`20x`** | 512×512 | 224×224 | `patch_embeddings_20x.pt` | Gland/stroma detail; **TITAN source** | **5** |
-| **`40x`** | 256×256 | 224×224 | `patch_embeddings_40x.pt` | Nuclear detail, mitoses | **5** |
+| **`thumbnail`** | — | — | team JPEG bank | Global architecture | — |
+| **`20x`** | 512×512 | 224×224 | `patch_embeddings_20x.pt` | Retrieval pool; **TITAN source** | **5** |
+| **runtime 10x/20x/40x** | 1024 / 512 / 256 | — | none | Pixel crops for ReAct zoom | — |
 
 **VLM gets raw patch images**, not CONCH embeddings. Embeddings are retrieval-only.
 
@@ -39,23 +38,22 @@ Each node carries **`zoom_level`**: `"5x"`, `"10x"`, `"20x"`, or `"40x"`. At inf
 
 TITAN was trained on **512×512 @ 20×**. `slide_embedding.pt` (1024-d) aggregates the ×20 pool only. Multi-scale CONCH pools are for Phase 1 retrieval.
 
-### Flat ×20 pool (ablation)
+### Runtime zoom (ReAct)
 
-Force all nodes to `patch_embeddings_20x.pt` regardless of `zoom_level`.
+When evidence is insufficient, the agent may either re-retrieve (new `sub_query`) or request a runtime crop at `10x`, `20x`, or `40x` around the best retrieved 20× coordinate. This uses `openslide` reads only and does not require offline 10×/40× embedding pools.
 
 ---
 
 ## 2. Phase 1 retrieval (locked steps)
 
 ```
-a. tier = node["zoom_level"]
-   patch_embeddings = load("patch_embeddings_{tier}.pt")
+a. pool = "20x"
+   patch_embeddings = load("patch_embeddings_20x.pt")
 
 b. node_text_emb = TitanEncoder.encode_text(node.retrieval_text)  # question + description, (768,)
 
-c. # Default: rank K-means centroids (kmeans_k=100 in configs/vision.yaml), then load winning patches
-   # Optional: search full patch pool (--search-all-patches) — simpler, slower
-   similarities = cosine_similarity(node_text_emb, centroid_embeddings[tier])
+c. # Default: rank full pool (search_all_patches: true). Optional K-means centroid restriction is ablation-only.
+   similarities = cosine_similarity(node_text_emb, patch_embeddings)
    top_k_indices = argsort(similarities, descending=True)[:k]
    top_k_patches = load_raw_patches(tier, top_k_indices)   # raw images for VLM
 
@@ -67,7 +65,7 @@ Configured in `configs/vision.yaml` → `retrieval.top_k_by_zoom`, `retrieval.km
 
 ### Adjacent-scale enrichment (CMT)
 
-When `retrieval.adjacent_scale.enabled: true`, each retrieved patch also loads its **parent** tile from the next-coarser pool (`parent_map` in config). Integration/report nodes (`tier=integration` or `node_kind=integration|report`) additionally load a **grandparent**. Images are passed to the VLM alongside the primary patch — embedding-level fusion is not used.
+Disabled by default in this repo. Coarse context is provided by always attaching the whole-slide thumbnail alongside the retrieved 20× patches.
 
 ### HippoRAG 2 (semantic memory, not patch retrieval)
 
@@ -80,10 +78,10 @@ Retrieves similar past CoT steps given `(node_id + partial chain)`. Top-2 steps 
 ```
 WSI (.svs) under /mnt/projects/mlmi/TUMUntera/TUM_Untera_data
   → thumbnail (done on cluster)
-  → tile at 5×/10×/20×/40× (native px per table above)
+  → tile at 20× only (native 512 px)
   → resize each patch to 224×224 → CONCHv1.5 vision encode via TitanEncoder.return_conch()
-  → save patch_embeddings_{5x,10x,20x,40x}.pt  (N × 768 each)
-  → K-means centroids per pool (default k=100) → kmeans_centroids_{zoom}.pt
+  → save patch_embeddings_20x.pt  (N × 768)
+  → Optional K-means (ablation) → kmeans_centroids_20x.pt
   → TITAN slide encode on 20× pool only → slide_embedding.pt
 ```
 
@@ -97,10 +95,10 @@ Tissue vs glass: current rule is grayscale mean ≤ 220 (`vision/wsi_io.py`). Re
 
 | # | Method | Zoom-aware? | Graph-aware? | Status |
 |---|--------|-------------|--------------|--------|
-| A | **CONCH cross-modal cosine** | Yes (4 pools) | Query + `description` via `encode_text()` | **Primary** — `TitanEncoder` single load |
-| B | **`zoom_level` routing** | Yes | Yes | **Primary path** |
-| C | **K-means centroid pool** | Yes | — | **Default on** (`kmeans_k=100`; optional full-pool search) |
-| D | **MMNavAgent CMT parent** | Yes | Partial | Config `parent_map`: 40×→20×, 20×→10×, 10×→5×; grandparent on integration nodes |
+| A | **CONCH cross-modal cosine** | Single pool (20×) | Query + `description` via `encode_text()` | **Primary** — `TitanEncoder` single load |
+| B | **Fixed 20× pool routing** | No | Yes | **Primary path** |
+| C | **K-means centroid pool** | No | — | Ablation only |
+| D | **MMNavAgent CMT parent** | No | Partial | Not used (thumbnail replaces parent tiles) |
 
 ---
 
@@ -109,7 +107,7 @@ Tissue vs glass: current rule is grayscale mean ≤ 220 (`vision/wsi_io.py`). Re
 | Quantity | Value |
 |----------|-------|
 | CONCH patch embedding dim | 768 |
-| CONCH pools per WSI | 4 (`5x`, `10x`, `20x`, `40x`) |
+| CONCH pools per WSI | 1 (`20x`) |
 | CONCH vision input | 224×224 (from variable native tile) |
 | TITAN slide embedding dim | 1024 |
 | TITAN source zoom | 20× only |

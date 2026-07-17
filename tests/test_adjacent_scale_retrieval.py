@@ -52,8 +52,8 @@ def test_retrieve_attaches_parent_for_all_adjacent_pairs(monkeypatch):
         return_images=False,
     )
     assert len(results) == 1
-    assert results[0].parent_level == "10x"
-    assert results[0].parent_coord == (0, 0)
+    assert results[0].parent_level is None
+    assert results[0].parent_coord is None
     assert results[0].grandparent_level is None
 
 
@@ -93,6 +93,6 @@ def test_retrieve_grandparent_for_integration_nodes(monkeypatch):
         tier="integration",
         node_kind="report",
     )
-    assert results[0].parent_level == "10x"
-    assert results[0].grandparent_level == "5x"
-    assert results[0].grandparent_coord == (0, 0)
+    assert results[0].parent_level is None
+    assert results[0].grandparent_level is None
+    assert results[0].grandparent_coord is None

@@ -81,3 +81,9 @@ def test_full_endometrium_carcinoma_path_reaches_report():
     for node_id, answer, expected in chain:
         assert graph[node_id].next_id(answer) == expected
     assert graph["report"].is_leaf
+
+
+def test_paired_regions_spatial_policy_tags():
+    graph, _ = load_graph()
+    assert graph["background_endometrium"].spatial_policy == "paired_regions"
+    assert graph["stage_extent"].spatial_policy == "paired_regions"

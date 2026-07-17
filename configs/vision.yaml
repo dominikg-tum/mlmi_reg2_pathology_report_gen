@@ -1,5 +1,7 @@
-# Offline WSI caches — matches cluster user.cache_dir in configs/paths.yaml
-cache_root: /mnt/projects/mlmi/reg2/dominik/cache
+# Fresh 20x CONCH corpus (HSV + stratified encode). Legacy multi-zoom caches stay in
+# /mnt/projects/mlmi/reg2/dominik/cache — do not overwrite.
+# NOTE: reg2/dominik is at NFS user quota; active corpus lives under TUMUntera personal tree.
+cache_root: /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2
 
 # ENCODER CONSTRAINT (locked): CONCHv1.5 via MahmoodLab/TITAN return_conch() only.
 # Requires paired text encoder for question-conditioned cosine sim retrieval.
@@ -34,7 +36,13 @@ magnification_bands:
     conch_input_px: 224
 
 retrieval:
-  kmeans_k: 100
+  # Default: cosine rank over full offline 20x pool. K-means pre-filter is ablation-only.
+  fixed_pool: 20x
+  paired_regions:
+    enabled: true
+    min_dist_20x_px: 2048
+  search_all_patches: true
+  kmeans_k: 100  # used only when search_all_patches: false or --kmeans-pool
   top_k: 5
   top_k_by_zoom:
     5x: 3
@@ -44,7 +52,7 @@ retrieval:
   d_min_20x_px: 512
   # CMT-style adjacent-scale context at retrieval (dual images to VLM, no learned fusion).
   adjacent_scale:
-    enabled: true
+    enabled: false
     parent_map:
       40x: 20x
       20x: 10x
@@ -53,10 +61,19 @@ retrieval:
   # CONCH offline: patch embedding pools per WSI (Phase 1 only).
   # 40x omitted for batch run — slow full-slide scan; add back when graph nodes need it.
   encode_levels:
-    - 5x
-    - 10x
     - 20x
   # abmil_fallback: reserved — only if cosine sim shows systematic failures (not implemented)
+
+# Offline tissue gate — slide-level HSV mask + per-patch tissue fraction (Phase B).
+tissue_filter:
+  method: slide_mask          # slide_mask | mean_threshold
+  mask_source: thumbnail      # thumbnail via openslide get_thumbnail
+  min_tissue_fraction: 0.40
+  hsv_sat_min: 0.08
+  hsv_val_max: 0.95
+  morph_close_px: 5
+  # Legacy fallback (method: mean_threshold)
+  background_threshold: 220
 
 defaults:
   visual: thumbnail
@@ -67,5 +84,9 @@ titan:
   model_id: MahmoodLab/TITAN
   # Pinned runtime deps (install in enroot before encode): timm==1.0.3
   # einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0 — use container torch; see load_paths.sh
-  max_patches_per_slide: 512
+  # Encode policy: n_tissue <= full_encode_threshold → encode ALL; else stratified grid → max_patches_per_slide
+  max_patches_per_slide: 4096
+  full_encode_threshold: 1024
+  patch_sampling: stratified_grid
+  grid_cells: [8, 8]
   batch_size: 16

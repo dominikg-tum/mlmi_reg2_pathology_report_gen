@@ -1,16 +1,18 @@
 #!/bin/bash
-# Submit offline WSI jobs within QOS MaxSubmit/MaxJobs limits (students: 2 jobs max).
-# Submits one array task at a time, waiting for a free slot before each sbatch.
-# Skips slides that already have required offline artifacts.
+# Submit offline WSI jobs on the cluster head (no laptop / VPN after start).
+# Respects MaxJobs=2; skips slides that already have patch_embeddings_20x.pt.
 #
-# Usage:
+# Usage (on head.garching.camp.cluster):
 #   bash scripts/cluster/submit_offline_wsi_batch.sh
-#   bash scripts/cluster/submit_offline_wsi_batch.sh --start 2 --end 459
+#   bash scripts/cluster/submit_offline_wsi_batch.sh --start 3 --end 463
+#
+# Detached (VPN-safe):
+#   bash scripts/cluster/start_offline_wsi_batch_daemon.sh --start 3
 
 set -euo pipefail
 
 START=0
-END=459
+END=463
 POLL_SEC=30
 MAX_USER_JOBS=2
 
@@ -26,38 +28,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
+CACHE_ROOT="${MLMI_CACHE_ROOT:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/cache_20x_v2}"
+NAME_MAP="${PINNED_REPO}/data/manifests/wsi_name_map.csv"
+
 # shellcheck source=load_paths.sh
-source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
-load_cluster_paths
+source "${PINNED_REPO}/scripts/cluster/load_paths.sh"
+load_cluster_paths "${PINNED_REPO}/configs/paths.yaml"
 
 slide_artifacts_complete() {
   local idx="$1"
-  python3 - "${REPO}" "${idx}" <<'PY'
-import sys
-from pathlib import Path
-
-repo = Path(sys.argv[1])
-sys.path.insert(0, str(repo))
-from scripts.vision._common import default_cache_root, default_data_dir, load_vision_config
-from vision.cache import slide_cache_dir
-from vision.wsi_io import resolve_wsi_files, slide_id_from_path
-
-vcfg = load_vision_config()
-data_dir = default_data_dir()
-cache_root = default_cache_root(vcfg)
-svs = resolve_wsi_files(data_dir, wsi_index=int(sys.argv[2]))[0]
-out_dir = slide_cache_dir(cache_root, slide_id_from_path(svs))
-required = [
-    "patch_embeddings_10x.pt",
-    "patch_embeddings_20x.pt",
-    "kmeans_centroids_10x.pt",
-    "kmeans_centroids_20x.pt",
-    "slide_embedding.pt",
-]
-missing = [name for name in required if not (out_dir / name).exists()]
-if missing:
-    raise SystemExit(1)
-PY
+  local slide_id
+  # Avoid Python on the head node (can hang under load); CSV wsi_index -> slide_id.
+  slide_id=$(
+    awk -F, -v i="${idx}" 'NR > 1 && $1 == i { gsub(/ /, "", $3); print $3; exit }' "${NAME_MAP}"
+  )
+  if [[ -z "${slide_id}" ]]; then
+    return 1
+  fi
+  [[ -f "${CACHE_ROOT}/${slide_id}/patch_embeddings_20x.pt" ]]
 }
 
 wait_for_slot() {
@@ -75,15 +64,20 @@ wait_for_slot() {
 
 submitted=0
 skipped=0
+echo "Batch submitter: wsi-index ${START}-${END} cache=${CACHE_ROOT}" >&2
 for idx in $(seq "${START}" "${END}"); do
   if slide_artifacts_complete "${idx}"; then
-    echo "SKIP wsi-index ${idx} (artifacts complete)"
+    echo "SKIP wsi-index ${idx} (patch_embeddings_20x.pt exists)"
     skipped=$((skipped + 1))
     continue
   fi
 
   wait_for_slot
-  out=$(cd "${REPO}" && sbatch --array="${idx}" scripts/cluster/run_offline_wsi.sh)
+  out=$(
+    cd "${PINNED_REPO}" && sbatch \
+      --export=ALL,MLMI_PINNED_REPO="${PINNED_REPO}" \
+      --array="${idx}" scripts/cluster/run_offline_wsi_pinned.sh
+  )
   echo "${out} (wsi-index ${idx})"
   submitted=$((submitted + 1))
 done

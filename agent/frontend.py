@@ -211,7 +211,7 @@ def run_phase1(
     cache_root: Path | None = None,
     runs_dir: Path | None = None,
     wsi_data_dir: Path | None = None,
-    search_all_patches: bool = False,
+    search_all_patches: bool | None = None,
 ) -> tuple[AgentRunResult, Path]:
     result = run_agent_traversal(
         backend=backend,

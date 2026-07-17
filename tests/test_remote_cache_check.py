@@ -35,11 +35,13 @@ def test_incomplete_in_range_uses_manifest(tmp_path: Path, monkeypatch) -> None:
     from vision.mag_config import load_vision_config
 
     load_vision_config.cache_clear()
+    try:
+        _write_required(slide_cache_dir(cache_root, "TUM_Uterus_0001.svs"))
+        _write_required(slide_cache_dir(cache_root, "TUM_Uterus_0003.svs"))
 
-    _write_required(slide_cache_dir(cache_root, "TUM_Uterus_0001.svs"))
-    _write_required(slide_cache_dir(cache_root, "TUM_Uterus_0003.svs"))
-
-    assert rcc.first_incomplete(repo) == 1
-    assert rcc.incomplete_in_range(repo, 0, 2) == [1]
-    assert rcc.slide_complete(repo, 0) is True
-    assert rcc.slide_complete(repo, 1) is False
+        assert rcc.first_incomplete(repo) == 1
+        assert rcc.incomplete_in_range(repo, 0, 2) == [1]
+        assert rcc.slide_complete(repo, 0) is True
+        assert rcc.slide_complete(repo, 1) is False
+    finally:
+        load_vision_config.cache_clear()

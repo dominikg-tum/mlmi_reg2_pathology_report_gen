@@ -237,7 +237,12 @@ streamlit run app.py
 python -m baselines.run_agent --backend dummy --memory flat --visual thumbnail
 
 # With Qwen (cluster)
-python -m baselines.run_agent --backend qwen --visual thumbnail --slide-id YOUR.svs
+python -m baselines.run_agent --backend qwen --memory flat --visual thumbnail --slide-id YOUR.svs
+
+# Batch baselines (test split; needs chains.jsonl + Qwen vLLM)
+python -m scripts.inference.run_baseline_batch --baseline a --split test --dry-run
+BASELINE=a sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
+python -m scripts.inference.run_eval_baselines --baseline all --split test
 
 # Eval
 python -m eval.run_eval --pred runs/pred.jsonl --gt data/labels/chains.jsonl

@@ -9,6 +9,7 @@ lexical keyword search (BM25).
 from __future__ import annotations
 
 import gc
+import json
 import os
 import re
 import shutil
@@ -16,19 +17,19 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from graph.schema import Node, RetrievalLevel
+from graph.schema import Node, Tier
 import pandas as pd
 
-from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
-from langchain_community.retrievers import BM25Retriever
-from langchain_classic.retrievers import EnsembleRetriever
-
+from extraction.labels_io import assign_splits
 from memory.base import SemanticMemory
 
 # Path to repository root directory
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_MANIFEST_PATH = REPO_ROOT / "data" / "memory" / "hybridrag_manifest.json"
+DEFAULT_REFERENCE_DIR = REPO_ROOT / "data" / "memory" / "reference"
+ReportDocument = dict[str, Any]
+
+_REFERENCE_CHUNK_REQUIRED = frozenset({"id", "title", "text", "source", "source_type"})
 
 
 class HybridRAGMemory(SemanticMemory):
@@ -39,71 +40,67 @@ class HybridRAGMemory(SemanticMemory):
     lexical keyword search (BM25). Vector search captures general conceptual meaning
     of a pathology report. BM25 ensures that highly specific biomarkers
     and abbreviations (e.g., "P40", "WT1") are not missed due to vector dilution.
+
+    Index contents: train-split case reports plus optional reference chunks
+    under ``data/memory/reference/**/*.jsonl``.
     """
 
-    def __init__(self):
+    def __init__(self, *, chroma_storage: str | Path | None = None):
         """
         Initializes the HybridRAGMemory, setting up storage paths and the
         domain-specific embedding model.
         """
-        self.chroma_storage = get_chroma_storage_default()
+        self.chroma_storage = (
+            Path(chroma_storage) if chroma_storage is not None else get_chroma_storage_default()
+        )
         self.vector_storage = None
         self.bm25_retriever = None
         self.ensemble_retriever = None
         self.vector_retriever = None
+        self._embeddings = None
 
-        # Initialise embedding model:
-        # NeuML/pubmedbert-base-embeddings or BAAI/bge-m3 (more powerful but bigger) for pathology
-        self.embeddings = HuggingFaceEmbeddings(model_name="NeuML/pubmedbert-base-embeddings")
+    @property
+    def embeddings(self) -> Any:
+        if self._embeddings is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
 
-    def build_index(self, train_reports_path: str, *, split: str = "train", force_rebuild: bool = False) -> None:
+            # NeuML/pubmedbert-base-embeddings or BAAI/bge-m3 for pathology
+            self._embeddings = HuggingFaceEmbeddings(
+                model_name="NeuML/pubmedbert-base-embeddings"
+            )
+        return self._embeddings
+
+    def build_index(
+        self,
+        train_reports_path: str,
+        *,
+        split: str = "train",
+        reference_dir: str | Path | None = None,
+        force_rebuild: bool = False,
+    ) -> None:
         """
         Builds or loads the ensemble index containing both Vector and BM25 databases.
 
-        Reads the pathology reports, filters them by dataset split and converts
-        them into Document objects. Chroma vector database is
-        saved to disk and reloaded if it already exists, unless force_rebuild is True.
+        Reads pathology reports (train split) and optional reference JSONL chunks,
+        converts them into Document objects, and persists the Chroma vector database.
 
         Args:
-            train_reports_path (str): Path to the Excel file containing the reports.
-            split (str): Which dataset split to index (default: "train").
-            force_rebuild (bool): If True, deletes any existing Chroma database
-                                  on disk and rebuilds embeddings.
+            train_reports_path: Path to the Excel file containing case reports.
+            split: Which dataset split to index from the spreadsheet (default: train).
+            reference_dir: Root directory scanned for ``**/*.jsonl`` reference chunks.
+            force_rebuild: Delete existing Chroma storage and rebuild embeddings.
 
         Raises:
             FileNotFoundError: If the specified Excel file does not exist.
         """
+        ref_dir = Path(reference_dir) if reference_dir is not None else get_reference_dir_default()
+        report_docs = load_report_documents(train_reports_path, split=split)
+        reference_docs = load_reference_documents(ref_dir)
+        documents = _as_langchain_documents(report_docs + reference_docs)
 
-        # Read reports file with pandas#
-        # Correct file path management is redundant at this point
-        # because of switch to CoT chains in future
-        try:
-            df = pd.read_excel(train_reports_path)
-        except FileNotFoundError as exception:
-            raise FileNotFoundError(
-                f"RAG: Reports Excel not found at '{train_reports_path}'"
-            ) from exception
-
-        # Optional: Only use reports with case_class A and B as others are not complete
-        # 28 of 220 cases are in class A and B so it doesn't really make sense to remove C-E
-        # df = df[df["case_class"].isin(['A', 'B'])]
-        # Remove empty reports if exist
-        df = df.dropna(subset=['english_reports'])
-
-        # Dropping rows that do not match split
-        if 'split' in df.columns:
-            df = df[df['split'] == split]
-
-        documents = []
-        # Iterate every row and create document of report with ID as metadata
-        for index, row in df.iterrows():
-            text = str(row['english_reports'])
-            slide_id = str(row.get('slide_ids', str(index)))
-
-            documents.append(Document(
-                page_content=text,
-                metadata={"slide_id": slide_id}
-            ))
+        from langchain_chroma import Chroma
+        from langchain_community.retrievers import BM25Retriever
+        from langchain_classic.retrievers import EnsembleRetriever
 
         # Delete existing index if force_build
         if force_rebuild and os.path.exists(self.chroma_storage):
@@ -123,14 +120,14 @@ class HybridRAGMemory(SemanticMemory):
         if os.path.exists(self.chroma_storage):
             self.vector_storage = Chroma(
                 persist_directory=self.chroma_storage,
-                embedding_function=self.embeddings
+                embedding_function=self.embeddings,
             )
         # Create semantic embeddings and save to file
         else:
             self.vector_storage = Chroma.from_documents(
                 documents,
                 self.embeddings,
-                persist_directory=self.chroma_storage
+                persist_directory=self.chroma_storage,
             )
 
         # Create retriever in initialization progress
@@ -143,8 +140,34 @@ class HybridRAGMemory(SemanticMemory):
         # Could also do ablation study on weights
         self.ensemble_retriever = EnsembleRetriever(
             retrievers=[self.vector_retriever, self.bm25_retriever],
-            weights=[0.65, 0.35]
+            weights=[0.65, 0.35],
         )
+
+    def ensure_loaded(self, *, manifest_path: Path | None = None) -> bool:
+        """Load an existing on-disk Chroma index + BM25 ensemble when available."""
+        if self.ensemble_retriever is not None:
+            return True
+
+        manifest = read_hybridrag_manifest(manifest_path)
+        if manifest:
+            chroma_path = Path(manifest["chroma_storage"])
+            source_path = Path(manifest["source_path"])
+            if chroma_path.exists() and source_path.exists():
+                self.chroma_storage = chroma_path
+                ref_dir = manifest.get("reference_dir")
+                self.build_index(
+                    str(source_path),
+                    split=str(manifest.get("split", "train")),
+                    reference_dir=ref_dir,
+                )
+                return self.ensemble_retriever is not None
+
+        if self.chroma_storage.exists():
+            source_path = get_labels_xlsx_default()
+            if source_path.exists():
+                self.build_index(str(source_path), split="train")
+                return self.ensemble_retriever is not None
+        return False
 
     def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
         """
@@ -154,27 +177,24 @@ class HybridRAGMemory(SemanticMemory):
         Enriches the base query with context from the graph.
 
         Args:
-            node (Node): Current node in the diagnostic graph.
-            query (str): Raw search string.
-            k (int): Base number of documents to retrieve.
+            node: Current node in the diagnostic graph.
+            query: Raw search string.
+            k: Base number of documents to retrieve.
 
         Returns:
-            str: A formatted string concatenating the top-k retrieved documents,
-                 including their source IDs and node metadata.
+            A formatted string concatenating the top-k retrieved documents.
 
         Raises:
-            RuntimeError: If called before `build_index()` is executed.
+            RuntimeError: If called before ``build_index()`` is executed.
         """
+        if self.ensemble_retriever is None and not self.ensure_loaded():
+            raise RuntimeError(
+                "RAG: HybridRAG index not loaded. Build it first with: "
+                "python -m scripts.memory.build_hybridrag_index"
+            )
 
-        if self.ensemble_retriever is None:
-            raise RuntimeError("RAG: build_index() must be called before retrieve()")
-
-        # Update k dynamically based on retrieval level
-        effective_k = {
-            RetrievalLevel.LOW: max(1, k // 2),
-            RetrievalLevel.MEDIUM: k,
-            RetrievalLevel.HIGH: min(k * 2, 20),
-        }[node.retrieval_level]
+        # Coarse zoom → fewer docs; fine zoom → more docs
+        effective_k = _effective_k_for_node(node, k)
 
         # Update query to include node context
         enriched_query = f"[{node.tier.value}] {node.question} {query}".strip()
@@ -183,17 +203,53 @@ class HybridRAGMemory(SemanticMemory):
         self.bm25_retriever.k = effective_k
         self.vector_retriever.search_kwargs = {"k": effective_k}
 
-        # Invoke query to receive best k matches for current prompt
-        results = self.ensemble_retriever.invoke(enriched_query)[:effective_k]
+        # Invoke query; fetch extra candidates when reranking reference chunks
+        fetch_k = effective_k * 2 if _prefer_reference_for_node(node) else effective_k
+        self.bm25_retriever.k = fetch_k
+        self.vector_retriever.search_kwargs = {"k": fetch_k}
+        results = self.ensemble_retriever.invoke(enriched_query)
+        results = _rerank_for_node(results, node)[:effective_k]
+
         formatted_results = []
-        # Format result for better readability
         for i, doc in enumerate(results):
-            source_id = doc.metadata.get('slide_id', 'Unknown')
+            source_id = doc.metadata.get("slide_id", "Unknown")
+            source_type = doc.metadata.get("source_type", "case_report")
+            title = doc.metadata.get("title", "")
+            title_suffix = f" | {title}" if title else ""
             formatted_results.append(
-                f"[Document {i + 1} | Source: {source_id} | Node: {node.id} | Tier: {node.tier.value}]\n"
+                f"[Document {i + 1} | Source: {source_id} | Type: {source_type}"
+                f"{title_suffix} | Node: {node.id} | Tier: {node.tier.value}]\n"
                 f"{doc.page_content}"
             )
         return "\n\n---\n\n".join(formatted_results)
+
+
+def _effective_k_for_node(node: Node, k: int) -> int:
+    """Map graph zoom tier to retrieval breadth."""
+    zoom = node.zoom_level.value if node.zoom_level is not None else "20x"
+    if zoom == "5x":
+        return max(1, k // 2)
+    if zoom in ("20x", "40x"):
+        return min(k * 2, 20)
+    return k
+
+
+def _prefer_reference_for_node(node: Node) -> bool:
+    """Local/integration nodes benefit most from textbook-style reference chunks."""
+    return node.tier in (Tier.LOCAL_FEATURES, Tier.INTEGRATION)
+
+
+def _rerank_for_node(results: list[Any], node: Node) -> list[Any]:
+    """Boost reference chunks on diagnostic nodes; keep ensemble order otherwise."""
+    if not _prefer_reference_for_node(node):
+        return results
+
+    def sort_key(doc: Any) -> tuple[int, int]:
+        is_reference = doc.metadata.get("source_type") == "reference"
+        node_match = 1 if node.id in (doc.metadata.get("graph_nodes") or []) else 0
+        return (1 if is_reference else 0, node_match)
+
+    return sorted(results, key=sort_key, reverse=True)
 
 
 def clean_tokenize(text: str) -> list[str]:
@@ -202,12 +258,12 @@ def clean_tokenize(text: str) -> list[str]:
     Strips punctuation and converts text to lowercase.
 
     Args:
-        text (str): The raw text string to tokenize.
+        text: The raw text string to tokenize.
 
     Returns:
-        list[str]: A list of cleaned, lowercase word tokens.
+        A list of cleaned, lowercase word tokens.
     """
-    return re.findall(r'\w+', text.lower())
+    return re.findall(r"\w+", text.lower())
 
 
 def load_config() -> dict[str, Any]:
@@ -217,7 +273,179 @@ def load_config() -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def get_chroma_storage_default():
+def get_chroma_storage_default() -> Path:
     """Retrieves the default path for Chroma database from the config."""
     cfg = load_config()
     return Path(cfg["rag"]["chroma_db_storage"])
+
+
+def get_reference_dir_default() -> Path:
+    """Default reference chunk root (repo-relative path in configs/paths.yaml)."""
+    cfg = load_config()
+    raw = cfg.get("rag", {}).get("reference_dir", "data/memory/reference")
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
+
+
+def get_labels_xlsx_default() -> Path:
+    """Default pathology reports spreadsheet (cluster labels xlsx)."""
+    cfg = load_config()
+    return Path(cfg["cluster"]["labels_xlsx"])
+
+
+def load_report_documents(
+    train_reports_path: str | Path,
+    *,
+    split: str = "train",
+) -> list[ReportDocument]:
+    """Load train-split report documents from the labels xlsx."""
+    path = Path(train_reports_path)
+    if not path.exists():
+        raise FileNotFoundError(f"RAG: Reports Excel not found at '{path}'")
+
+    df = pd.read_excel(path)
+    if "english_reports" not in df.columns:
+        raise ValueError("RAG: labels xlsx missing column 'english_reports'")
+
+    splits = assign_splits(len(df))
+    if "split" not in df.columns:
+        df = df.copy()
+        df["split"] = [splits.get(int(i), "train") for i in range(len(df))]
+
+    df = df.dropna(subset=["english_reports"])
+    df = df[df["split"] == split]
+
+    documents: list[ReportDocument] = []
+    for index, row in df.iterrows():
+        text = str(row["english_reports"])
+        slide_id = str(row.get("slide_ids", index))
+        documents.append(
+            {
+                "page_content": text,
+                "metadata": {
+                    "slide_id": slide_id,
+                    "source_type": "case_report",
+                },
+            }
+        )
+    return documents
+
+
+def load_reference_documents(reference_dir: str | Path | None = None) -> list[ReportDocument]:
+    """Load curated reference chunks from ``**/*.jsonl`` under reference_dir."""
+    root = Path(reference_dir) if reference_dir is not None else get_reference_dir_default()
+    if not root.exists():
+        return []
+
+    documents: list[ReportDocument] = []
+    for jsonl_path in sorted(root.rglob("*.jsonl")):
+        for line_no, line in enumerate(jsonl_path.read_text(encoding="utf-8").splitlines(), start=1):
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                chunk = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"RAG: invalid JSON in {jsonl_path}:{line_no}: {exc}"
+                ) from exc
+            documents.append(_reference_chunk_to_document(chunk, jsonl_path, line_no))
+    return documents
+
+
+def _reference_chunk_to_document(
+    chunk: dict[str, Any],
+    source_path: Path,
+    line_no: int,
+) -> ReportDocument:
+    missing = _REFERENCE_CHUNK_REQUIRED - chunk.keys()
+    if missing:
+        raise ValueError(
+            f"RAG: reference chunk at {source_path}:{line_no} missing fields: {sorted(missing)}"
+        )
+    if chunk.get("source_type") != "reference":
+        raise ValueError(
+            f"RAG: reference chunk at {source_path}:{line_no} must have source_type='reference'"
+        )
+
+    chunk_id = str(chunk["id"])
+    title = str(chunk["title"])
+    body = str(chunk["text"]).strip()
+    if not body:
+        raise ValueError(f"RAG: reference chunk {chunk_id!r} has empty text")
+
+    header = f"{title}\nSource: {chunk['source']}\n\n"
+    graph_nodes = chunk.get("graph_nodes") or []
+    if not isinstance(graph_nodes, list):
+        raise ValueError(f"RAG: reference chunk {chunk_id!r} graph_nodes must be a list")
+
+    return {
+        "page_content": header + body,
+        "metadata": {
+            "slide_id": chunk_id,
+            "source_type": "reference",
+            "title": title,
+            "source": str(chunk["source"]),
+            "topic": str(chunk.get("topic", "")),
+            "graph_nodes": [str(node_id) for node_id in graph_nodes],
+            "tier": str(chunk.get("tier", "")),
+            "reference_file": _relative_to_repo(source_path),
+        },
+    }
+
+
+def _relative_to_repo(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _as_langchain_documents(rows: list[ReportDocument]) -> list[Any]:
+    from langchain_core.documents import Document
+
+    return [
+        Document(page_content=row["page_content"], metadata=row["metadata"])
+        for row in rows
+    ]
+
+
+def write_hybridrag_manifest(
+    path: Path,
+    *,
+    source_path: Path,
+    chroma_storage: Path,
+    split: str,
+    document_count: int,
+    report_document_count: int | None = None,
+    reference_document_count: int = 0,
+    reference_dir: Path | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "source_path": str(source_path.resolve()),
+        "chroma_storage": str(chroma_storage.resolve()),
+        "split": split,
+        "document_count": document_count,
+        "report_document_count": report_document_count
+        if report_document_count is not None
+        else document_count - reference_document_count,
+        "reference_document_count": reference_document_count,
+    }
+    if reference_dir is not None:
+        payload["reference_dir"] = str(reference_dir.resolve())
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def read_hybridrag_manifest(path: Path | None = None) -> dict[str, Any] | None:
+    manifest_path = path or DEFAULT_MANIFEST_PATH
+    if not manifest_path.exists():
+        return None
+    raw = json.loads(manifest_path.read_text())
+    if not isinstance(raw, dict):
+        return None
+    if not raw.get("source_path") or not raw.get("chroma_storage"):
+        return None
+    return raw

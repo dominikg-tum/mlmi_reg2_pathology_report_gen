@@ -8,6 +8,7 @@ from pathlib import Path
 
 from baselines.agent_runner import (
     default_runs_dir,
+    resolve_search_all_patches,
     run_agent_traversal,
     write_phase1_outputs,
 )
@@ -21,8 +22,24 @@ def main() -> None:
     parser.add_argument("--visual", default="patch_retrieve")
     parser.add_argument("--retriever", default="graph_guided")
     parser.add_argument("--navigator", default="graph_guided")
+    parser.add_argument("--node-react", action="store_true", help="Enable bounded per-node ReAct loop")
+    parser.add_argument(
+        "--structured-answer",
+        action="store_true",
+        help="Return Step A JSON only (no ReAct loop)",
+    )
     parser.add_argument("--runs-dir", type=Path, default=None)
-    parser.add_argument("--search-all-patches", action="store_true")
+    pool = parser.add_mutually_exclusive_group()
+    pool.add_argument(
+        "--search-all-patches",
+        action="store_true",
+        help="Force full 20x pool (default from configs/vision.yaml)",
+    )
+    pool.add_argument(
+        "--kmeans-pool",
+        action="store_true",
+        help="Ablation: restrict cosine rank to K-means centroid pool (kmeans_k)",
+    )
     parser.add_argument("--output", type=Path, default=None, help="Override cot_chain.json path")
     args = parser.parse_args()
 
@@ -34,7 +51,12 @@ def main() -> None:
         navigator=args.navigator,
         slide_id=args.slide_id,
         skip_report_nodes=True,
-        search_all_patches=args.search_all_patches,
+        node_react=args.node_react,
+        structured_answer=args.structured_answer,
+        search_all_patches=resolve_search_all_patches(
+            kmeans_pool=args.kmeans_pool,
+            search_all_patches=args.search_all_patches,
+        ),
     )
 
     runs_dir = args.runs_dir or default_runs_dir()

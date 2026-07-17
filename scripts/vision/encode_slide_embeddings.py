@@ -23,7 +23,9 @@ from scripts.vision._common import (
 )
 from vision.cache import slide_cache_dir
 from vision.encoders.titan import TitanEncoder
-from vision.patching import extract_patches
+from vision.encode_selection import coords_for_encode
+from vision.patching import extract_patch_coords, load_patches_from_coords
+from scripts.vision._common import load_coords_from_pt
 from vision.wsi_io import slide_id_from_path, write_thumbnail
 
 
@@ -70,18 +72,53 @@ def encode_one_slide(
     if write_thumb and not (out_dir / "thumbnail.png").exists():
         write_thumbnail(svs_path, out_dir / "thumbnail.png", max_edge_px=max_edge_px)
 
-    patches, coords, patch_size_lv0 = extract_patches(
-        svs_path,
-        mag_band="20x",
-        max_patches=max_patches,
-    )
-    if not patches:
-        raise RuntimeError(f"No tissue patches extracted from {svs_path}")
+    coord_path = out_dir / "coords_20x.pt"
+    meta_20 = out_dir / "meta_20x.json"
+    canonical_emb = out_dir / "patch_embeddings_20x.pt"
+    patch_emb: np.ndarray | None = None
+    patches: list = []
+    encode_coords: list[tuple[int, int]] = []
+    patch_size_lv0 = 0
+    sampling_mode = ""
+    sampling_meta: dict = {}
 
-    patch_emb = encoder.encode_patches(patches, batch_size=batch_size)
+    if meta_20.exists():
+        patch_size_lv0 = int(json.loads(meta_20.read_text()).get("patch_size_lv0", 0))
+
+    if canonical_emb.exists():
+        data = torch.load(canonical_emb, map_location="cpu", weights_only=False)
+        if isinstance(data, dict):
+            patch_emb = np.asarray(data["embeddings"], dtype=np.float32)
+            coords_arr = np.asarray(data.get("coords", []), dtype=np.int64)
+            if coords_arr.size:
+                encode_coords = [(int(x), int(y)) for x, y in coords_arr]
+        else:
+            patch_emb = np.asarray(data, dtype=np.float32)
+        if not encode_coords and coord_path.exists():
+            encode_coords = load_coords_from_pt(coord_path)
+        sampling_mode = "from_cache"
+        sampling_meta = {"n_patches_tiled": len(encode_coords)}
+    else:
+        if coord_path.exists():
+            coords = load_coords_from_pt(coord_path)
+        else:
+            coords, patch_size_lv0 = extract_patch_coords(
+                svs_path, mag_band="20x", max_patches=0
+            )
+        encode_coords, sampling_mode, sampling_meta = coords_for_encode(
+            coords, patch_size_lv0=patch_size_lv0, max_patches=max_patches
+        )
+
+    if not encode_coords:
+        raise RuntimeError(f"No tissue patches for slide embedding on {svs_path}")
+
+    if patch_emb is None:
+        patches = load_patches_from_coords(svs_path, encode_coords, mag_band="20x")
+        patch_emb = encoder.encode_patches(patches, batch_size=batch_size)
+
     slide_emb = encoder.encode_slide(
         patch_emb,
-        np.asarray(coords, dtype=np.int64),
+        np.asarray(encode_coords, dtype=np.int64),
         patch_size_lv0,
     )
 
@@ -92,21 +129,26 @@ def encode_one_slide(
     canonical_coords = out_dir / "coords_20x.pt"
     if not canonical_emb.exists():
         torch.save(
-            {"embeddings": patch_emb, "coords": np.asarray(coords)},
+            {"embeddings": patch_emb, "coords": np.asarray(encode_coords)},
             canonical_emb,
         )
     if not canonical_coords.exists():
-        torch.save(np.asarray(coords, dtype=np.int64), canonical_coords)
+        torch.save(np.asarray(encode_coords, dtype=np.int64), canonical_coords)
 
     evidence_names = _save_evidence_patches(
-        patches, coords, out_dir / "evidence", k=3
+        patches, encode_coords, out_dir / "evidence", k=3
     )
 
     meta = {
         "slide_id": sid,
         "source": str(svs_path),
         "model_id": encoder.model_id,
-        "n_patches": len(patches),
+        "n_patches": len(encode_coords),
+        "n_patches_tiled": sampling_meta.get(
+            "n_patches_tiled", len(encode_coords)
+        ),
+        "n_patches_encoded": len(encode_coords),
+        "sampling_mode": sampling_mode,
         "patch_size_lv0": patch_size_lv0,
         "embedding_dim": int(slide_emb.shape[0]),
         "evidence_files": evidence_names,

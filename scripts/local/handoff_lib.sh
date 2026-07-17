@@ -49,12 +49,11 @@ wait_for_wsi_jobs_drain() {
   done
 }
 
-# Resume index = number of slide_embedding.pt under cache (fast find; ~seconds on NFS).
-# Assumes slides were processed in wsi-index order (0, 1, 2, …).
+# Resume index = count of patch_embeddings_20x.pt under cache (fast find).
 remote_fast_resume_index() {
   local n
-  echo "Resume index from slide_embedding.pt count in ${REMOTE_CACHE_DIR}..." >&2
-  n=$(_cluster_ssh "find '${REMOTE_CACHE_DIR}' -maxdepth 2 -name slide_embedding.pt 2>/dev/null | wc -l")
+  echo "Resume index from patch_embeddings_20x.pt count in ${REMOTE_CACHE_DIR}..." >&2
+  n=$(_cluster_ssh "find '${REMOTE_CACHE_DIR}' -maxdepth 2 -name patch_embeddings_20x.pt 2>/dev/null | wc -l")
   echo "${n// /}"
 }
 

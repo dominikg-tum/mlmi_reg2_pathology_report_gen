@@ -4,6 +4,8 @@
 python -m eval.run_eval --pred runs/b2/predictions.jsonl --gt data/labels/chains.jsonl --split test
 ```
 
+`--split` filters on the `split` field in the **ground-truth** JSONL (e.g. only `test` cases). Predictions are matched by `slide_id`.
+
 Prediction JSONL format (one case per line):
 
 ```json

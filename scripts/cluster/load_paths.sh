@@ -6,9 +6,17 @@
 #   2. Or add export HF_TOKEN=... to ~/.bashrc (also parsed when bashrc skips non-interactive shells)
 
 CLUSTER_REPO="/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen"
+# Prefer laptop-synced pinned tree when present (reg2/dominik may be quota-full).
+PINNED_REPO_DEFAULT="/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen"
 
 _cluster_paths_repo() {
-  echo "${CLUSTER_REPO}"
+  if [[ -n "${MLMI_PINNED_REPO:-}" && -f "${MLMI_PINNED_REPO}/configs/paths.yaml" ]]; then
+    echo "${MLMI_PINNED_REPO}"
+  elif [[ -f "${PINNED_REPO_DEFAULT}/configs/paths.yaml" ]]; then
+    echo "${PINNED_REPO_DEFAULT}"
+  else
+    echo "${CLUSTER_REPO}"
+  fi
 }
 
 # Load HF_TOKEN and other user exports for non-interactive SLURM jobs.
@@ -71,6 +79,13 @@ cluster_titan_pip_snippet() {
   cat <<'EOF'
 pip install -q timm==1.0.3 einops==0.6.1 einops-exts==0.0.4 transformers==4.46.0
 pip install -q openslide-python pillow pyyaml tqdm huggingface_hub 2>/dev/null || true
+EOF
+}
+
+cluster_hybridrag_pip_snippet() {
+  cat <<'EOF'
+pip install -q pandas openpyxl pyyaml tqdm 2>/dev/null || true
+pip install -q langchain-core langchain-community langchain-huggingface langchain-chroma langchain-classic rank-bm25 sentence-transformers 2>/dev/null || true
 EOF
 }
 

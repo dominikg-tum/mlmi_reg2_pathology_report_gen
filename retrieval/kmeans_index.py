@@ -1,4 +1,4 @@
-"""K-means candidate pool (K=100) — sole pre-filter for retrieval (no ABMIL)."""
+"""K-means candidate pool (optional ablation pre-filter; default is full-pool cosine)."""
 
 from __future__ import annotations
 

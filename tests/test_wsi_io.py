@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-import numpy as np
+from pathlib import Path
 
 import numpy as np
 
-from vision.wsi_io import find_parent_patch_index, is_tissue_patch, slide_id_from_path
+from vision.wsi_io import _zoom_crop_topleft, find_parent_patch_index, is_tissue_patch, slide_id_from_path
 
 
-def test_slide_id_from_path():
-    assert slide_id_from_path(__import__("pathlib").Path("a/b/case01.svs")) == "case01.svs"
+def test_slide_id_from_path_unmapped():
+    assert slide_id_from_path(Path("a/b/case01.svs")) == "case01.svs"
+
+
+def test_slide_id_from_path_mapped_uuid():
+    assert (
+        slide_id_from_path(Path("be61bc63-d708-4b81-9ea0-2370524e73a8.svs"))
+        == "TUM_Uterus_0001.svs"
+    )
 
 
 def test_is_tissue_patch_filters_white():
@@ -29,3 +36,15 @@ def test_find_parent_patch_index_contains_centre():
         patch_size_lv0_medium=1000,
     )
     assert idx == 0
+
+
+def test_zoom_crop_topleft_recentres_to_target_patch():
+    # from: 512px tile at level-0, to: 256px tile (40x-like)
+    # center of from tile at (1000+256, 2000+256) => (1256, 2256)
+    # topleft should be (1256-128, 2256-128) => (1128, 2128)
+    x1, y1 = _zoom_crop_topleft(
+        (1000, 2000),
+        from_patch_size_lv0=512,
+        to_patch_size_lv0=256,
+    )
+    assert (x1, y1) == (1128, 2128)

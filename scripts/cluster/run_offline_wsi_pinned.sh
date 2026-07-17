@@ -1,25 +1,26 @@
 #!/bin/bash
 #SBATCH --job-name=wsi-offline-pipeline
-#SBATCH --chdir=/mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen
+#SBATCH --chdir=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
 #SBATCH --time=06:00:00
-#SBATCH --array=0-459
-#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.err
+#SBATCH --array=0-463
+#SBATCH --output=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/offline_%A_%a.out
+#SBATCH --error=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/offline_%A_%a.err
 #
-# Same as run_offline_wsi.sh but runs code from user.pinned_repo_dir (laptop rsync target).
+# Runs code from user.pinned_repo_dir (laptop rsync target under TUMUntera).
 # Submit via scripts/local/submit_offline_wsi_remote.sh — not the team shared repo checkout.
 
 set -euo pipefail
 
-PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/reg2/dominik/repos/mlmi_reg2_pathology_report_gen}"
+PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
+export MLMI_PINNED_REPO="${PINNED_REPO}"
 
 # shellcheck source=load_paths.sh
 source "${PINNED_REPO}/scripts/cluster/load_paths.sh"
-load_cluster_paths
+load_cluster_paths "${PINNED_REPO}/configs/paths.yaml"
 REPO="${PINNED_REPO}"
 
 mkdir -p "${LOGS_DIR}"

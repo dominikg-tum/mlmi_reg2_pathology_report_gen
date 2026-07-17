@@ -12,6 +12,9 @@ VISION_CONFIG_PATH = REPO_ROOT / "configs" / "vision.yaml"
 
 VALID_ZOOM_LEVELS = ("5x", "10x", "20x", "40x")
 
+# Runtime zoom menu for ReAct (pixels only, not offline CONCH pools).
+RUNTIME_ZOOM_LEVELS = ("10x", "20x", "40x")
+
 # Legacy aliases → canonical zoom keys used in graph JSON and artifact names.
 _ZOOM_ALIASES = {
     "4x": "5x",
@@ -74,6 +77,55 @@ VALID_THUMBNAIL_VARIANTS = ("thumbnails", "thumbnails_kmeans", "thumbnails_kmean
 
 def retrieval_config() -> dict:
     return load_vision_config().get("retrieval", {})
+
+
+def default_search_all_patches() -> bool:
+    """Whether Phase 1 cosine retrieval ranks the full offline pool (default: true)."""
+    return bool(retrieval_config().get("search_all_patches", True))
+
+
+def paired_regions_config() -> dict:
+    return retrieval_config().get("paired_regions", {})
+
+
+def fixed_retrieval_pool() -> str:
+    """CONCH retrieval pool zoom key (default: 20x)."""
+    pool = str(retrieval_config().get("fixed_pool", "20x"))
+    pool = normalize_zoom(pool)
+    if pool not in VALID_ZOOM_LEVELS:
+        raise ValueError(
+            f"retrieval.fixed_pool must be one of {VALID_ZOOM_LEVELS}; got {pool!r}"
+        )
+    return pool
+
+
+def clamp_runtime_zoom(zoom: str) -> str:
+    """Clamp arbitrary zoom strings to the allowed runtime zoom menu."""
+    key = normalize_zoom(zoom).replace("1.25x", "5x")
+    if key in RUNTIME_ZOOM_LEVELS:
+        return key
+    if key in ("4x", "5x"):
+        return "10x"
+    return "20x"
+
+
+def tissue_filter_config() -> dict:
+    return load_vision_config().get("tissue_filter", {})
+
+
+def titan_config() -> dict:
+    return load_vision_config().get("titan", {})
+
+
+def tiling_encode_config() -> dict:
+    """Patch cap / stratified sampling knobs for offline CONCH encode."""
+    tcfg = titan_config()
+    return {
+        "max_patches_per_slide": int(tcfg.get("max_patches_per_slide", 4096)),
+        "full_encode_threshold": int(tcfg.get("full_encode_threshold", 1024)),
+        "patch_sampling": str(tcfg.get("patch_sampling", "stratified_grid")),
+        "grid_cells": tuple(int(x) for x in tcfg.get("grid_cells", [8, 8])),
+    }
 
 
 def encode_levels() -> list[str]:
