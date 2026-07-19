@@ -9,7 +9,12 @@ from typing import Any
 
 import yaml
 
-from agent.backends import AnswerBackend, DummyBackend, ZeroShotQwenBackend
+from agent.backends import (
+    AnswerBackend,
+    DummyBackend,
+    FineTunedBackend,
+    ZeroShotQwenBackend,
+)
 from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
 from agent.types import Step
@@ -44,6 +49,10 @@ def build_backend(name: str, cfg: dict | None = None) -> AnswerBackend:
         q = cfg["qwen"]
         client = openai.OpenAI(base_url=q["api_base_url"], api_key=q["api_key"])
         return ZeroShotQwenBackend(client, q["model_name"])
+    if name == "finetuned":
+        ft = cfg.get("finetuned", {})
+        base_model = ft.get("base_model") or cfg["models"]["qwen3_vl_8b"]
+        return FineTunedBackend(base_model, ft.get("adapter_dir") or None)
     raise ValueError(f"Unknown backend: {name!r}")
 
 
