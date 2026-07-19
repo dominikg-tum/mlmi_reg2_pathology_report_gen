@@ -41,6 +41,19 @@ rag = [
     "rank-bm25>=0.2",
     "sentence-transformers>=3.0",
 ]
+# Phase-1 LoRA fine-tune (training/lora.py). Needs a transformers new enough for
+# Qwen3-VL (>=4.57); install fresh in the enroot env — NOT compatible with the
+# transformers==4.46 pin used for TITAN/CONCH offline encode.
+training = [
+    "transformers>=4.57",
+    "peft>=0.13",
+    "trl>=0.12",
+    "accelerate>=1.0",
+    "datasets>=3.0",
+    "bitsandbytes>=0.44",
+    "qwen-vl-utils>=0.0.8",
+    "pillow>=10.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

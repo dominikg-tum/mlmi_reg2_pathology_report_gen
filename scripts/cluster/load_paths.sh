@@ -107,6 +107,7 @@ import yaml
 
 p = yaml.safe_load(open(sys.argv[1]))
 c, u, r, q = p["cluster"], p["user"], p["repo"], p["qwen"]
+f = p.get("finetuned", {})
 
 def emit(key, value):
     print(f'{key}="{value}"')
@@ -115,8 +116,12 @@ emit("PROJECT_ROOT", c["project_root"])
 emit("REPO", r["path"])
 emit("CONTAINER", u["container_sqsh"])
 emit("LOGS_DIR", u["logs_dir"])
+emit("WORK_DIR", u["work_dir"])
 emit("MODEL", q["model_path"])
 emit("MODEL_NAME", q["model_name"])
+emit("LORA_BASE_MODEL", f.get("base_model", q["model_path"]))
+emit("LORA_ADAPTER_DIR", f.get("adapter_dir", ""))
+emit("LORA_MERGED_DIR", f.get("merged_dir", ""))
 PY
 )"
 }
