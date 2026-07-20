@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from eval.metrics.normalize import normalize_answer
 from eval.schemas import CaseRecord
 
 
@@ -9,9 +10,16 @@ def _edges(record: CaseRecord) -> list[tuple[str, str]]:
     out = []
     for s in record.chain:
         key = s.node_id or s.question
-        out.append((key, s.answer.strip().lower()))
+        out.append((key, normalize_answer(s.answer)))
     return out
 
+def node_accuracy(pred: CaseRecord, gt: CaseRecord) -> float:
+    gt_map = {s.node_id: normalize_answer(s.answer) for s in gt.chain if s.node_id}
+    pred_map = {s.node_id: normalize_answer(s.answer) for s in pred.chain if s.node_id}
+    if not gt_map:
+        return 0.0
+    correct = sum(1 for nid, a in gt_map.items() if pred_map.get(nid) == a)
+    return correct / len(gt_map)
 
 def binary_path_validity(pred: CaseRecord, gt: CaseRecord) -> float:
     if gt.node_path and pred.node_path:

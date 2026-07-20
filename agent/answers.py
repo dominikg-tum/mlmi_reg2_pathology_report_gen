@@ -46,7 +46,30 @@ def normalize_answer(raw: str, node: Node) -> str | None:
 
     text = _answer_text(raw)
     if node.interaction == InteractionType.MULTI_SELECT:
-        return text or None
+        if not text:
+            return None
+        parts = re.split(r",|\band\b|\n", text)
+        matched = []
+        for part in parts:
+            key = _canonical_key(part)
+            if not key:
+                continue
+            exact = [o for o in node.options if _canonical_key(o) == key]
+            if len(exact) == 1:
+                matched.append(exact[0])
+                continue
+
+            raw_key = key
+            words = [w for w in raw_key.split("_") if len(w) >= 4]
+            mentioned = set()
+            for w in words:
+                for option in node.options:
+                    if re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", _canonical_key(option)):
+                        mentioned.add(option)
+            if mentioned:
+                matched.extend(mentioned)
+
+        return ",".join(sorted(set(matched))) if matched else None
 
     if len(node.options) == 1:
         return node.options[0]
