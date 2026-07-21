@@ -17,15 +17,36 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from baselines.agent_runner import load_paths_config, load_vision_cache_root
 from vision.cache import build_slide_cache
 from vision.mag_config import fixed_retrieval_pool
-from vision.thumbnail import _resolve_wsi_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CHAINS = REPO_ROOT / "data" / "labels" / "chains.jsonl"
+
+
+def _index_wsi_files(wsi_data_dir: Path) -> dict[str, str]:
+    """One walk of the WSI dir → {filename: path}. Avoids a recursive glob per slide."""
+    index: dict[str, str] = {}
+    if not wsi_data_dir.exists():
+        return index
+    for root, _dirs, files in os.walk(wsi_data_dir):
+        for fn in files:
+            if fn.lower().endswith(".svs"):
+                index.setdefault(fn, os.path.join(root, fn))
+    return index
+
+
+def _wsi_present(slide_id: str, index: dict[str, str]) -> bool:
+    # slide_id may be a comma-separated multi-slide case; inference uses the first.
+    for part in slide_id.split(","):
+        part = part.strip()
+        if part and part in index:
+            return True
+    return False
 
 
 def _train_slides(chains_path: Path, split: str) -> list[str]:
@@ -85,6 +106,10 @@ def main() -> None:
         print("FAIL: no usable train records (check split / extraction_status).")
         raise SystemExit(1)
 
+    print("indexing WSI files (one pass)...", flush=True)
+    wsi_index = _index_wsi_files(wsi_data_dir)
+    print(f"  found {len(wsi_index)} .svs files", flush=True)
+
     no_thumb: list[str] = []
     no_patches: list[str] = []
     no_wsi: list[str] = []
@@ -95,8 +120,7 @@ def main() -> None:
         thumb_ok = sc.thumbnail_path is not None and sc.thumbnail_path.exists()
         pe = sc.patch_embeddings_path(pool)
         patches_ok = pe is not None and pe.exists()
-        wsi = _resolve_wsi_path(sc, wsi_path=None, wsi_data_dir=wsi_data_dir)
-        wsi_ok = wsi is not None
+        wsi_ok = _wsi_present(slide_id, wsi_index)
 
         if not thumb_ok:
             no_thumb.append(slide_id)
