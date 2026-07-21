@@ -23,6 +23,7 @@ from pathlib import Path
 from baselines.agent_runner import load_paths_config, load_vision_cache_root
 from vision.cache import build_slide_cache
 from vision.mag_config import fixed_retrieval_pool
+from vision.wsi_mapping import canonical_slide_id, disk_filename
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CHAINS = REPO_ROOT / "data" / "labels" / "chains.jsonl"
@@ -116,11 +117,15 @@ def main() -> None:
     ready = 0
 
     for slide_id in slides:
-        sc = build_slide_cache(cache_root, slide_id)
+        first = slide_id.split(",")[0].strip()
+        canonical = canonical_slide_id(first)
+        sc = build_slide_cache(cache_root, canonical)
         thumb_ok = sc.thumbnail_path is not None and sc.thumbnail_path.exists()
         pe = sc.patch_embeddings_path(pool)
         patches_ok = pe is not None and pe.exists()
-        wsi_ok = _wsi_present(slide_id, wsi_index)
+        wsi_ok = _wsi_present(disk_filename(first), wsi_index) or _wsi_present(
+            first, wsi_index
+        )
 
         if not thumb_ok:
             no_thumb.append(slide_id)

@@ -196,8 +196,7 @@ def build_training_jsonl(
     output_path: Path,
     *,
     retriever=None,
-    slide_cache_for=None,
-    wsi_path_for=None,
+    resolve_slide=None,
     images_out_root: Path | None = None,
     visual_method: str = "patch_retrieve",
     answer_format: str = "json",
@@ -213,11 +212,11 @@ def build_training_jsonl(
     retriever
         A ``PatchRetriever`` (e.g. graph_guided over TITAN/CONCH). Required for
         ``patch_retrieve`` nodes; if ``None`` only thumbnails are attached.
-    slide_cache_for
-        ``callable(slide_id) -> SlideCache`` — usually ``build_slide_cache(cache_root, …)``.
-    wsi_path_for
-        ``callable(slide_cache) -> Path | None`` — resolves the ``.svs`` so patch PNGs
-        can be cropped (``return_images``).
+    resolve_slide
+        ``callable(slide_id) -> (SlideCache | None, wsi_path | None)``. Owns the
+        UUID→canonical name mapping: the returned ``SlideCache`` must point at the
+        canonical (``TUM_Uterus_XXXX``) cache dir, and ``wsi_path`` at the on-disk
+        ``.svs``. If ``None``, samples are built text/thumbnail-only.
     images_out_root
         Directory the caller owns; per-node patch crops are written under
         ``images_out_root/<slide>/<node>/``. Defaults next to ``output_path`` so we
@@ -249,8 +248,9 @@ def build_training_jsonl(
             if not slide_id or not cot:
                 continue
 
-            slide_cache = slide_cache_for(slide_id) if slide_cache_for else None
-            wsi_path = wsi_path_for(slide_cache) if (wsi_path_for and slide_cache) else None
+            slide_cache, wsi_path = (
+                resolve_slide(slide_id) if resolve_slide else (None, None)
+            )
 
             prior_steps: list[tuple[str, str]] = []
             n_slides += 1

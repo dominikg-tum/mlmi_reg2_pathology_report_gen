@@ -21,7 +21,7 @@ from baselines.agent_runner import (
 from retrieval.base import get_retriever
 from training.dataset import build_training_jsonl
 from vision.cache import build_slide_cache
-from vision.thumbnail import _resolve_wsi_path
+from vision.wsi_mapping import canonical_slide_id, resolve_mapped_wsi_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CHAINS = REPO_ROOT / "data" / "labels" / "chains.jsonl"
@@ -76,20 +76,28 @@ def main() -> None:
             resolve_search_all_patches(search_all_patches=args.search_all_patches),
         )
 
-    def slide_cache_for(slide_id: str):
-        if not cache_root:
-            return None
-        return build_slide_cache(cache_root, slide_id)
-
-    def wsi_path_for(slide_cache):
-        return _resolve_wsi_path(slide_cache, wsi_path=None, wsi_data_dir=wsi_data_dir)
+    def resolve_slide(slide_id: str):
+        # chains.jsonl stores raw UUID (or specimen) ids; the cache + thumbnails are
+        # keyed by the canonical TUM_Uterus_XXXX name, while the .svs on disk keeps
+        # the UUID. Map both via data/manifests/wsi_name_map.csv. Multi-slide cases:
+        # use the first slide (parity with inference).
+        first = slide_id.split(",")[0].strip()
+        canonical = canonical_slide_id(first)
+        slide_cache = build_slide_cache(cache_root, canonical) if cache_root else None
+        wsi_path = None
+        try:
+            found = resolve_mapped_wsi_files(wsi_data_dir, slide=first)
+            if found:
+                wsi_path = found[0]
+        except FileNotFoundError:
+            wsi_path = None
+        return slide_cache, wsi_path
 
     n = build_training_jsonl(
         args.chains,
         args.output,
         retriever=retriever,
-        slide_cache_for=slide_cache_for,
-        wsi_path_for=wsi_path_for,
+        resolve_slide=resolve_slide,
         images_out_root=args.images_out,
         visual_method=args.visual,
         answer_format=args.answer_format,
