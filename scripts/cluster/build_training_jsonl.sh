@@ -5,8 +5,7 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --time=08:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=/mnt/home/dogakonuk/logs/lora_build_jsonl_%j.out
 #SBATCH --error=/mnt/home/dogakonuk/logs/lora_build_jsonl_%j.err
 #
