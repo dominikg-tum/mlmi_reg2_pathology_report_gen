@@ -48,6 +48,7 @@ readarray -t _ENROOT_HF_ENV < <(cluster_enroot_hf_env)
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   "${_ENROOT_HF_ENV[@]}" \
+  --env USER="${USER:-dogakonuk}" --env LOGNAME="${USER:-dogakonuk}" \
   "${CONTAINER}" \
   bash -lc "
     set -euo pipefail
