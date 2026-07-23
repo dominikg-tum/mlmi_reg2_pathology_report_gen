@@ -80,8 +80,12 @@ class TitanEncoder:
         self._ensure_loaded()
         import torch
 
+        # TITAN.encode_text expects tokenized input_ids (same as zero_shot_classifier),
+        # not raw strings. Passing a list crashes on input_ids[:, :-1].
+        tokenizer = self._titan.text_encoder.tokenizer
+        tokens = tokenizer([text]).to(self.device)
         with torch.inference_mode():
-            out = self._titan.encode_text([text], normalize=True)
+            out = self._titan.encode_text(tokens, normalize=True)
         if isinstance(out, torch.Tensor):
             vec = out[0]
         else:
