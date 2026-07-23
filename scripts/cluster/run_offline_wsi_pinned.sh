@@ -1,7 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=wsi-offline-pipeline
 #SBATCH --chdir=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
-#SBATCH --export=ALL
+# Avoid --export=ALL: on requeue SLURM re-runs login-shell env retrieval and can
+# hold the job as "user env retrieval failed requeued held". Job sets its own env.
+#SBATCH --export=NONE
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
@@ -14,6 +16,9 @@
 # Submit via scripts/local/submit_offline_wsi_remote.sh — not the team shared repo checkout.
 
 set -euo pipefail
+
+# Minimal PATH for enroot / python3 when submitted with --export=NONE.
+export PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:${PATH}}"
 
 PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
 export MLMI_PINNED_REPO="${PINNED_REPO}"

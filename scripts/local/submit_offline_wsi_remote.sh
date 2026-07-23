@@ -36,5 +36,5 @@ if ((DO_SYNC)); then
 fi
 
 echo "Submitting wsi-index ${WSI_INDEX} from pinned repo (not team shared checkout)..."
-out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=ALL,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${WSI_INDEX}' scripts/cluster/run_offline_wsi_pinned.sh")
+out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=NONE,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${WSI_INDEX}' scripts/cluster/run_offline_wsi_pinned.sh")
 echo "${out}"

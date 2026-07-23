@@ -75,7 +75,7 @@ for idx in $(seq "${START}" "${END}"); do
   wait_for_slot
   out=$(
     cd "${PINNED_REPO}" && sbatch \
-      --export=ALL,MLMI_PINNED_REPO="${PINNED_REPO}" \
+      --export=NONE,MLMI_PINNED_REPO="${PINNED_REPO}" \
       --array="${idx}" scripts/cluster/run_offline_wsi_pinned.sh
   )
   echo "${out} (wsi-index ${idx})"
