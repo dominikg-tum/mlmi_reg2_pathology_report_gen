@@ -1,4 +1,4 @@
-# Training (DOMI) — Phase-1 LoRA node answerer
+# Training (DOGA) — Phase-1 LoRA node answerer
 
 LoRA fine-tune the **Phase-1 node answerer** (default **Qwen3-VL-8B-Instruct**) so it
 answers each graph node from the retrieved patches better than zero-shot.
@@ -10,7 +10,12 @@ Pipeline (mirrors inference for train/serve parity):
    + `graph_guided` pathway per GT node → `training/samples.jsonl`
 3. `training/lora.py::train_lora` — multimodal LoRA SFT (transformers + peft + trl)
 4. Serve: merge adapter → vLLM (`ZeroShotQwenBackend`) **or** `FineTunedBackend` (HF)
-5. Evaluate Edge-F1 vs zero-shot on the test split
+5. `scripts/training/eval_finetuned.py` — answer-key accuracy vs base on the test split
+
+Slides whose offline embeddings are missing are skipped per-node (logged to stderr with
+a summary), so a partially-encoded cache never aborts the whole build. Slide ids in
+`chains.jsonl` are mapped UUID→`TUM_Uterus_XXXX` via `data/manifests/wsi_name_map.csv`
+(`vision/wsi_mapping.py`) to find the cache; the on-disk `.svs` keeps its UUID.
 
 ## What one training sample looks like
 
@@ -20,7 +25,8 @@ For each **train** slide and each **single_select / boolean** node on its GT pat
 - `system` = `agent/prompts.py::STEP_A_SYSTEM`
 - `user`   = `format_step_a_user(node, prior_steps)` (question + guidance + allowed keys + prior answers)
 - `images` = whole-slide thumbnail (+ CONCH top-k patches for `patch_retrieve` nodes),
-  saved per node under `cache_dir/train_samples/<node_id>/`
+  saved per node under `IMAGES_OUT/<slide_id>/<node_id>/` (default `<output>/train_images`;
+  the slide ICC profile is stripped so PIL can re-read the crops during training)
 - `target` = GT answer as JSON `{"answer_key": <gt>, "rationale": "", "confidence": 1.0}`
   (matches `agent/backends.complete_json`, i.e. `--structured-answer` / `--node-react`)
 
@@ -35,15 +41,26 @@ everything except the assistant answer tokens (completion-only loss).
 Two **separate** jobs — the data build uses the TITAN pin (`transformers==4.46`), training
 needs `transformers>=4.57` for Qwen3-VL. Do not mix the envs.
 
+GPU partitions: `24g` works for QLoRA (`LOAD_IN_4BIT=1`) on the 8B model; `h200` has more
+headroom. On `students_opportunistic` QOS a job can be preempted at launch (instant
+`FAILED`, `ExitCode 0:53`) — just resubmit, or queue on `h200`.
+
 ```bash
-# 0) prerequisites: chains.jsonl + offline 20x caches + thumbnails for train slides
-sbatch scripts/cluster/build_chains.sh          # if not done
+# 0) prerequisites (once): check caches/thumbnails/WSIs for the split
+python -m scripts.training.check_prereqs --split train
 
-# 1) build training/samples.jsonl (GPU: CONCH text-encode + WSI crops)
-sbatch scripts/cluster/build_training_jsonl.sh  # env: SPLIT=train LIMIT=0 OUTPUT=...
+# 1) build training/samples.jsonl (GPU: TITAN text-encode + WSI crops; installs openslide-bin)
+LIMIT=2 sbatch scripts/cluster/build_training_jsonl.sh   # smoke test first
+sbatch scripts/cluster/build_training_jsonl.sh           # full: env SPLIT/LIMIT/OUTPUT/IMAGES_OUT
 
-# 2) LoRA fine-tune (1x 80G A100)
-sbatch scripts/cluster/train_lora.sh            # env: EPOCHS LR LORA_R BATCH_SIZE GRAD_ACCUM LOAD_IN_4BIT=1
+# 2) LoRA fine-tune
+EPOCHS=2 sbatch --partition=24g scripts/cluster/train_lora.sh
+#   env: EPOCHS LR LORA_R BATCH_SIZE GRAD_ACCUM LOAD_IN_4BIT=1
+
+# 3) build the TEST split, then evaluate base vs adapter
+SPLIT=test OUTPUT=$WORK/lora/test_samples.jsonl IMAGES_OUT=$WORK/lora/test_images \
+    sbatch scripts/cluster/build_training_jsonl.sh
+sbatch --partition=24g scripts/cluster/eval_lora.sh      # env: TEST_JSONL REPORT_DIR LIMIT
 ```
 
 Local module entry points (same as the sbatch wrappers):
@@ -80,9 +97,30 @@ python -m baselines.run_agent --backend finetuned --visual patch_retrieve \
 
 ## Evaluate
 
+### Results (v1, 2026-07-24)
+Test split, 314 single_select nodes, 2 epochs, r=16, QLoRA:
+answer-key accuracy **0.596 (base) → 0.691 (fine-tuned), +9.6 pts**.
+Biggest gains: `compartment` 0.64→0.82, `stage_extent` 0.40→0.90,
+`microscopic_pattern` 0.20→0.80, `synthesis_interpretation` 0.48→0.63,
+`endometrium_assessment` 0.27→0.39. Coverage limited by ~59 train slides missing
+20x embeddings; rerun after they're encoded to expand the set.
+
+`scripts/cluster/eval_lora.sh` runs `scripts/training/eval_finetuned.py` twice (base, then
+adapter) over the test-split samples, printing an `OVERALL accuracy` line plus
+per-interaction / per-node breakdowns, and writing `base_report.json` /
+`finetuned_report.json` under `REPORT_DIR`. Accuracy = exact `answer_key` match vs the GT.
+
 ```bash
-# run the fine-tuned backend over the test split, then:
-python -m eval.run_eval --pred runs/predictions.jsonl --gt data/labels/chains.jsonl --split test
+tail -60 /mnt/home/<you>/logs/lora_eval_<jobid>.out   # compare the two OVERALL accuracy lines
+```
+
+Single config (local module entry point):
+
+```bash
+python -m scripts.training.eval_finetuned \
+    --test-jsonl "$WORK/lora/test_samples.jsonl" \
+    --base-model "$LORA_BASE_MODEL" --adapter-dir "$LORA_ADAPTER_DIR" \
+    --report "$WORK/lora/eval/finetuned_report.json"   # omit --adapter-dir for the base model
 ```
 
 ## Future ablation — KEEP-style ontology grouping (not implemented)
