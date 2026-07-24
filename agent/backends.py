@@ -250,10 +250,12 @@ class FineTunedBackend:
         self.model = model.eval()
 
     def _generate(self, system: str, user: str, image_paths: list) -> str:
-        from PIL import Image
+        from PIL import Image, PngImagePlugin
 
         from training.dataset import build_chat_messages
 
+        # WSI crops can carry multi-MB ICC profiles that trip PIL's text-chunk cap.
+        PngImagePlugin.MAX_TEXT_CHUNK = 100 * 1024 * 1024
         imgs = [Image.open(p).convert("RGB") for p in image_paths if Path(p).exists()]
         messages = build_chat_messages(system, user, None, len(imgs))
         text = self.processor.apply_chat_template(
