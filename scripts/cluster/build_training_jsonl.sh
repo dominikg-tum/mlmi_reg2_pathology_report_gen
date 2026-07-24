@@ -50,6 +50,9 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
     set -euo pipefail
     cd '${REPO_DIR}'
 $(cluster_titan_pip_snippet)
+    # Native OpenSlide C lib for cropping patch PNGs from .svs (container lacks it);
+    # openslide-bin is auto-detected by openslide-python>=1.4.
+    pip install -q openslide-bin 2>/dev/null || true
 $(cluster_hf_login_snippet)
     python -m scripts.training.build_training_jsonl \
       --output '${OUTPUT}' \
