@@ -2,7 +2,7 @@
 #SBATCH --job-name=lora-train
 #SBATCH --chdir=/mnt/home/dogakonuk/mlmi_reg2_pathology_report_gen
 #SBATCH --export=ALL
-#SBATCH --partition=80g
+#SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
