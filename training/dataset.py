@@ -131,6 +131,20 @@ def _read_chain_records(chains_path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _save_png(img, path: Path) -> None:
+    """Save a crop as PNG without the WSI ICC profile.
+
+    openslide passes the slide's (sometimes multi-MB) ICC profile through to each
+    crop; re-embedding it produces an oversized iCCP chunk that trips PIL's
+    MAX_TEXT_CHUNK guard on reload. Drop it so the training loader can read cleanly.
+    """
+    try:
+        img.info.pop("icc_profile", None)
+    except Exception:
+        pass
+    img.save(path, icc_profile=None)
+
+
 def _save_patch_images(retrieved: list, out_dir: Path) -> list[str]:
     """Persist retrieved patch (+ optional parent/grandparent) crops to ``out_dir``.
 
@@ -143,17 +157,17 @@ def _save_patch_images(retrieved: list, out_dir: Path) -> list[str]:
     for i, rp in enumerate(retrieved):
         if getattr(rp, "patch_image", None) is not None:
             p = out_dir / f"patch_{i}_{rp.level}.png"
-            rp.patch_image.save(p)
+            _save_png(rp.patch_image, p)
             paths.append(str(p))
         if getattr(rp, "parent_image", None) is not None:
             pl = rp.parent_level or "parent"
             pp = out_dir / f"patch_{i}_parent_{pl}.png"
-            rp.parent_image.save(pp)
+            _save_png(rp.parent_image, pp)
             paths.append(str(pp))
         if getattr(rp, "grandparent_image", None) is not None:
             gl = rp.grandparent_level or "grandparent"
             gp = out_dir / f"patch_{i}_grandparent_{gl}.png"
-            rp.grandparent_image.save(gp)
+            _save_png(rp.grandparent_image, gp)
             paths.append(str(gp))
     return paths
 

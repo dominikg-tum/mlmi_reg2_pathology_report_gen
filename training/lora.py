@@ -129,7 +129,12 @@ class _MultimodalCollator:
         self.cfg = cfg
 
     def _load_images(self, paths: list[str]):
-        from PIL import Image
+        from PIL import Image, PngImagePlugin
+
+        # WSI crops carry the slide's (sometimes multi-MB) ICC profile, which trips
+        # PIL's anti-decompression-bomb cap on PNG text chunks. These are trusted
+        # local files, so lift the cap enough to decode them.
+        PngImagePlugin.MAX_TEXT_CHUNK = 100 * 1024 * 1024
 
         images = []
         for p in paths:
