@@ -17,6 +17,7 @@ by default, matching ``agent/backends.complete_json``). One ``ChainSample`` per
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -233,6 +234,8 @@ def build_training_jsonl(
     )
     n_written = 0
     n_slides = 0
+    n_skipped_nodes = 0
+    slides_missing: set[str] = set()
 
     with output_path.open("w", encoding="utf-8") as out:
         for rec in records:
@@ -270,13 +273,27 @@ def build_training_jsonl(
 
                 safe_slide = slide_id.replace(",", "_").replace("/", "_")
                 safe_node = node_id.replace("/", "_")
-                images = _node_image_paths(
-                    node,
-                    slide_cache,
-                    retriever=retriever if visual_method != "none" else None,
-                    wsi_path=wsi_path,
-                    images_out_dir=images_out_root / safe_slide / safe_node,
-                )
+                try:
+                    images = _node_image_paths(
+                        node,
+                        slide_cache,
+                        retriever=retriever if visual_method != "none" else None,
+                        wsi_path=wsi_path,
+                        images_out_dir=images_out_root / safe_slide / safe_node,
+                    )
+                except Exception as exc:  # noqa: BLE001 - datagen must survive missing caches
+                    # Missing offline embeddings / WSI / crop failure for this slide:
+                    # skip the node (keep prior context) so the batch build completes.
+                    n_skipped_nodes += 1
+                    if slide_id not in slides_missing:
+                        slides_missing.add(slide_id)
+                        print(
+                            f"[build_training_jsonl] skip slide {slide_id!r} "
+                            f"node {node_id!r}: {type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                        )
+                    prior_steps.append((node_id, answer))
+                    continue
                 system = prompts.STEP_A_SYSTEM
                 user = prompts.format_step_a_user(node=node, prior_steps=prior_steps)
                 target = render_target(answer, answer_format=answer_format)
@@ -303,6 +320,13 @@ def build_training_jsonl(
                 n_written += 1
                 prior_steps.append((node_id, answer))
 
+    if slides_missing:
+        print(
+            f"[build_training_jsonl] wrote {n_written} samples from {n_slides} slides; "
+            f"skipped {n_skipped_nodes} node(s) across {len(slides_missing)} slide(s) "
+            f"with missing/broken visual assets (e.g. no offline embeddings).",
+            file=sys.stderr,
+        )
     return n_written
 
 
