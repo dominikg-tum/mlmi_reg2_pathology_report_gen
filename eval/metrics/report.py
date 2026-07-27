@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from eval.metrics.normalize import normalize_answer
 import re
+from collections import Counter
 
 _bertscore = None
 _NUM_UNIT = re.compile(r"\d+\.?\d*\s*(?:mm|cm|µm|mcm|%)?", re.IGNORECASE)
@@ -69,7 +70,7 @@ def bert_score_f1(pred_report: str, gt_report: str) -> float:
             lang="en", model_type="microsoft/deberta-large-mnli",
         )
         return result["f1"][0]
-    except ImportError:
+    except (ImportError, OSError, ValueError):
         return _token_f1(pred_report, gt_report)
 
 
@@ -126,5 +127,7 @@ def numeric_fidelity(pred_report: str, gt_report: str) -> float:
     pred_matches = [norm(m) for m in _NUM_UNIT.findall(pred_report) if m.strip()]
     if not gt_matches:
         return 1.0
-    matched = sum(1 for n in gt_matches if n in pred_matches)
+    gt_counts = Counter(gt_matches)
+    pred_counts = Counter(pred_matches)
+    matched = sum(min(gt_counts[n], pred_counts[n]) for n in gt_counts)
     return matched / len(gt_matches)

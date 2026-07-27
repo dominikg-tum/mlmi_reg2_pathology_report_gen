@@ -26,9 +26,10 @@ rank-bm25>=0.2
 sentence-transformers>=3.0
 pandas>=2.0
 openpyxl>=3.1
+pdfplumber>=0.11
 
-# Optional eval / training
-# pandas
-# rouge-score
-# sacrebleu
-# sentence-transformers
+# Eval metrics (BERTScore, ROUGE-L, BLEU-4): uv pip install -e ".[dev,eval]"
+evaluate>=0.4
+bert-score>=0.3.13
+rouge-score>=0.1
+sacrebleu>=2.4

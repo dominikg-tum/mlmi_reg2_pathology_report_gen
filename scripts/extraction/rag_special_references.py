@@ -77,6 +77,9 @@ def extract_explanatory_notes(text: str) -> dict[str, dict[str, str]]:
         # inline citation superscripts like "laparotomy.1" or "clefts.2,3"
         body = re.sub(r"(?<=[a-zA-Z\)])\.(\d{1,2}(,\d{1,2})*)\b", ".", body)
 
+        if not body.strip():
+            raise ValueError(f"Note {letter} ('{title}') has an empty body after cleanup")
+
         sections[letter] = {"title": title, "body": body}
     return sections
 
@@ -84,6 +87,7 @@ def extract_explanatory_notes(text: str) -> dict[str, dict[str, str]]:
 def sections_to_chunks(sections: dict, mapping: dict) -> list[dict]:
     chunks = []
     for letter, data in sections.items():
+        raw_nodes = mapping.get(letter, [])
         chunks.append({
             "id": f"cap_endo_v51_{letter.lower()}",
             "title": data["title"],
@@ -91,7 +95,8 @@ def sections_to_chunks(sections: dict, mapping: dict) -> list[dict]:
             "source": "CAP Endometrium v5.1 (Uterus_5.1.0.0.REL_CAPCP)",
             "source_type": "reference",
             "topic": data["title"],
-            "graph_nodes": mapping.get(letter) or ["unmapped"],
+            "graph_nodes": raw_nodes or ["unmapped"],
+            "_is_mapped": bool(raw_nodes),
         })
     return chunks
 
@@ -125,12 +130,25 @@ def main() -> None:
 
         sections = extract_explanatory_notes(cleaned)
         print(f"Found {len(sections)} explanatory notes: {sorted(sections.keys())}")
+
+        expected_letters = set(NOTE_TO_GRAPH_NODES.keys())
+        found_letters = set(sections.keys())
+        if found_letters != expected_letters:
+            raise ValueError(
+                f"Section extraction mismatch: expected {sorted(expected_letters)}, "
+                f"got {sorted(found_letters)}"
+            )
         for letter, data in sections.items():
             print(f"  {letter}. {data['title']} ({len(data['body'])} chars)")
 
-        all_chunks = sections_to_chunks(sections, NOTE_TO_GRAPH_NODES)
-        mapped_chunks = [c for c in all_chunks if c["graph_nodes"]]
-        unmapped_chunks = [c for c in all_chunks if not c["graph_nodes"]]
+        mapped_letters = {letter for letter, nodes in NOTE_TO_GRAPH_NODES.items() if nodes}
+        unmapped_letters = set(sections.keys()) - mapped_letters
+
+        mapped_sections = {l: sections[l] for l in mapped_letters if l in sections}
+        unmapped_sections = {l: sections[l] for l in unmapped_letters if l in sections}
+
+        mapped_chunks = sections_to_chunks(mapped_sections, NOTE_TO_GRAPH_NODES)
+        unmapped_chunks = sections_to_chunks(unmapped_sections, NOTE_TO_GRAPH_NODES)
 
         write_jsonl(mapped_chunks, OUTPUT_DIR / "mapped" / "mapped.jsonl")
         write_jsonl(unmapped_chunks, OUTPUT_DIR / "unmapped" / "unmapped.jsonl")

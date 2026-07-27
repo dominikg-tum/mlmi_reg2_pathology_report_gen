@@ -90,8 +90,12 @@ def main() -> None:
     print(f"Node Accuracy:       {sum(node_acc) / n:.4f}")
     print(f"BERT:                 {sum(bert) / n:.4f}")
     print(f"Num. FID:             {sum(num_fid) / n:.4f}")
-    print(f"Neg Score:           {sum(neg_score) / n:.4f}")
-    print(f"Neg Count:           {sum(neg_count) / n:.4f}")
+    total_neg_count = sum(neg_count)
+    if total_neg_count == 0:
+        print("Negation Consistency:  N/A (no comparable keywords found)")
+    else:
+        weighted_neg = sum(s * c for s, c in zip(neg_score, neg_count)) / total_neg_count
+        print(f"Negation Consistency:  {weighted_neg:.4f}  (over {total_neg_count} comparable mentions)")
 
 
 if __name__ == "__main__":

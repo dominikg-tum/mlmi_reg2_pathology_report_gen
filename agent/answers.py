@@ -7,6 +7,8 @@ import re
 
 from graph.schema import InteractionType, Node
 
+_GENERIC_MODIFIERS = {"positive", "negative", "present", "moderate", "severe", "focal", "diffuse", "mild"}
+
 
 def _canonical_key(text: str) -> str:
     text = text.strip().lower()
@@ -48,7 +50,7 @@ def normalize_answer(raw: str, node: Node) -> str | None:
     if node.interaction == InteractionType.MULTI_SELECT:
         if not text:
             return None
-        parts = re.split(r",|\band\b|\n", text)
+        parts = re.split(r",|\band\b|\n", text, flags=re.IGNORECASE)
         matched = []
         for part in parts:
             key = _canonical_key(part)
@@ -60,7 +62,7 @@ def normalize_answer(raw: str, node: Node) -> str | None:
                 continue
 
             raw_key = key
-            words = [w for w in raw_key.split("_") if len(w) >= 4]
+            words = [w for w in raw_key.split("_") if len(w) >= 4 and w not in _GENERIC_MODIFIERS]
             mentioned = set()
             for w in words:
                 for option in node.options:
