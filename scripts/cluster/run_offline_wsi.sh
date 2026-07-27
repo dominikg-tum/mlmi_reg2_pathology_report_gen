@@ -1,7 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=wsi-offline-pipeline
 #SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
-#SBATCH --export=ALL
+# Avoid --export=ALL: prevents "user env retrieval failed requeued held" on requeue.
+#SBATCH --export=NONE
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
@@ -11,6 +12,8 @@
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/offline_%A_%a.err
 
 set -euo pipefail
+
+export PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:${PATH}}"
 
 # shellcheck source=load_paths.sh
 source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh

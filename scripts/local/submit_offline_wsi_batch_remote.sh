@@ -128,7 +128,7 @@ for idx in $(seq "${START}" "${END}"); do
   fi
 
   echo "Submitting wsi-index ${idx}..."
-  if ! out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=ALL,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${idx}' scripts/cluster/run_offline_wsi_pinned.sh"); then
+  if ! out=$(_cluster_ssh "cd '${PINNED_REPO}' && sbatch --export=NONE,MLMI_PINNED_REPO='${PINNED_REPO}' --array='${idx}' scripts/cluster/run_offline_wsi_pinned.sh"); then
     echo "ERROR: sbatch failed for wsi-index ${idx}" >&2
     exit 1
   fi
