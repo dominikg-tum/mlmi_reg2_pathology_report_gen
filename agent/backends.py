@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agent.types import Step
@@ -46,32 +47,7 @@ class ZeroShotQwenBackend:
         *,
         extra_context: str = "",
     ) -> tuple[str, float]:
-        history = "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in memory)
-        visual_note = _visual_prompt_note(visual)
-        prompt_parts = [f"Visual evidence:{visual_note or ' none attached.'}"]
-        if history:
-            prompt_parts.append(f"Prior diagnostic answers:\n{history}")
-        if extra_context:
-            prompt_parts.append(f"Additional context:\n{extra_context}")
-        if node.description:
-            prompt_parts.append(f"Diagnostic guidance:\n{node.description}")
-        prompt_parts.append(f"Current question:\n{node.question}")
-        if node.options:
-            prompt_parts.append(
-                "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
-            )
-        if node.node_kind == NodeKind.REPORT:
-            prompt_parts.append(
-                "Combine the visual findings and all prior diagnostic answers into a "
-                "concise final pathology report. State the specimen/procedure when "
-                "supported, followed by the principal diagnosis and key qualifiers. "
-                "Do not mention the reasoning process or answer keys."
-            )
-        elif node.interaction == InteractionType.FREE_TEXT:
-            prompt_parts.append("Return a concise pathology answer.")
-        else:
-            prompt_parts.append("Return exactly one allowed answer key.")
-        prompt = "\n\n".join(prompt_parts)
+        prompt = _build_answer_prompt(node, visual, memory, extra_context)
         image_paths = _visual_image_paths(visual)
         content = build_user_content(prompt, image_paths)
 
@@ -118,25 +94,62 @@ class ZeroShotQwenBackend:
         choice = resp.choices[0]
         raw = (choice.message.content or "").strip()
         confidence = _first_token_prob(choice)
+        return _parse_json_soft(raw), confidence, raw
 
-        # Soft-fail on malformed JSON so traverse/node_react can retry the node
-        # instead of aborting the whole diagnostic chain.
-        parsed: dict[str, Any] = {}
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            start = raw.find("{")
-            end = raw.rfind("}")
-            if start >= 0 and end > start:
-                try:
-                    parsed = json.loads(raw[start : end + 1])
-                except Exception:
-                    parsed = {}
-            else:
+
+def _build_answer_prompt(
+    node: Node,
+    visual: VisualBundle | None,
+    memory: list[Step],
+    extra_context: str,
+) -> str:
+    """Shared user prompt for the plain (non-structured) answer path."""
+    history = "\n".join(f"Q: {s.question}\nA: {s.answer}" for s in memory)
+    visual_note = _visual_prompt_note(visual)
+    prompt_parts = [f"Visual evidence:{visual_note or ' none attached.'}"]
+    if history:
+        prompt_parts.append(f"Prior diagnostic answers:\n{history}")
+    if extra_context:
+        prompt_parts.append(f"Additional context:\n{extra_context}")
+    if node.description:
+        prompt_parts.append(f"Diagnostic guidance:\n{node.description}")
+    prompt_parts.append(f"Current question:\n{node.question}")
+    if node.options:
+        prompt_parts.append(
+            "Allowed answer keys:\n" + "\n".join(f"- {option}" for option in node.options)
+        )
+    if node.node_kind == NodeKind.REPORT:
+        prompt_parts.append(
+            "Combine the visual findings and all prior diagnostic answers into a "
+            "concise final pathology report. State the specimen/procedure when "
+            "supported, followed by the principal diagnosis and key qualifiers. "
+            "Do not mention the reasoning process or answer keys."
+        )
+    elif node.interaction == InteractionType.FREE_TEXT:
+        prompt_parts.append("Return a concise pathology answer.")
+    else:
+        prompt_parts.append("Return exactly one allowed answer key.")
+    return "\n\n".join(prompt_parts)
+
+
+def _parse_json_soft(raw: str) -> dict[str, Any]:
+    """Soft-fail JSON parse so traverse/node_react can retry instead of aborting."""
+    parsed: dict[str, Any] = {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(raw[start : end + 1])
+            except Exception:
                 parsed = {}
-        if not isinstance(parsed, dict):
+        else:
             parsed = {}
-        return parsed, confidence, raw
+    if not isinstance(parsed, dict):
+        parsed = {}
+    return parsed
 
 
 def _visual_prompt_note(visual: VisualBundle | None) -> str:
@@ -190,3 +203,95 @@ class DummyBackend:
         if node.edges:
             return next(iter(node.edges)), 1.0
         return "Sample pathology report.", 1.0
+
+
+class FineTunedBackend:
+    """LoRA-tuned Qwen3-VL node answerer, served locally via HF ``generate``.
+
+    Matches ``ZeroShotQwenBackend`` (``answer`` + ``complete_json``) so it works with
+    ``--structured-answer`` / ``--node-react``. Prompts are built with the same
+    ``build_chat_messages`` helper used to construct the training data, so serving
+    mirrors training exactly. For higher throughput, merge the adapter
+    (``training/merge_lora.py``) and serve with vLLM + ``ZeroShotQwenBackend`` instead.
+    """
+
+    def __init__(
+        self,
+        base_model: str,
+        adapter_dir: str | None = None,
+        *,
+        max_new_tokens: int = 128,
+        max_pixels: int = 768 * 28 * 28,
+    ):
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        self._torch = torch
+        self.max_new_tokens = max_new_tokens
+        self.processor = AutoProcessor.from_pretrained(
+            base_model, trust_remote_code=True, max_pixels=max_pixels
+        )
+        load_kwargs = {
+            "trust_remote_code": True,
+            "dtype": torch.bfloat16,
+            "device_map": "auto",
+        }
+        try:
+            from transformers import Qwen3VLForConditionalGeneration
+
+            model = Qwen3VLForConditionalGeneration.from_pretrained(base_model, **load_kwargs)
+        except Exception:
+            model = AutoModelForImageTextToText.from_pretrained(base_model, **load_kwargs)
+
+        if adapter_dir:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(model, adapter_dir)
+        self.model = model.eval()
+
+    def _generate(self, system: str, user: str, image_paths: list) -> str:
+        from PIL import Image, PngImagePlugin
+
+        from training.dataset import build_chat_messages
+
+        # WSI crops can carry multi-MB ICC profiles that trip PIL's text-chunk cap.
+        PngImagePlugin.MAX_TEXT_CHUNK = 100 * 1024 * 1024
+        imgs = [Image.open(p).convert("RGB") for p in image_paths if Path(p).exists()]
+        messages = build_chat_messages(system, user, None, len(imgs))
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.processor(
+            text=[text],
+            images=[imgs] if imgs else None,
+            return_tensors="pt",
+        ).to(self.model.device)
+        with self._torch.no_grad():
+            out = self.model.generate(
+                **inputs, max_new_tokens=self.max_new_tokens, do_sample=False
+            )
+        gen = out[:, inputs["input_ids"].shape[1] :]
+        return self.processor.batch_decode(gen, skip_special_tokens=True)[0].strip()
+
+    def answer(
+        self,
+        node: Node,
+        visual: VisualBundle | None,
+        memory: list[Step],
+        *,
+        extra_context: str = "",
+    ) -> tuple[str, float]:
+        prompt = _build_answer_prompt(node, visual, memory, extra_context)
+        raw = self._generate(SYSTEM_PROMPT, prompt, _visual_image_paths(visual))
+        return raw, 1.0
+
+    def complete_json(
+        self,
+        node: Node,
+        visual: VisualBundle | None,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> tuple[dict[str, Any], float, str]:
+        raw = self._generate(system_prompt, user_prompt, _visual_image_paths(visual))
+        return _parse_json_soft(raw), 1.0, raw

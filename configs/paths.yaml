@@ -54,6 +54,15 @@ qwen:
   api_key: token-abc123
   model_name: Qwen3-VL-8B-Instruct
 
+# Phase-1 LoRA node answerer (training/lora.py). Owner: DOGA. base_model is the
+# shared frozen backbone; adapter_dir holds the trained LoRA (small, ~100s MB);
+# merged_dir is the merge_and_unload output for vLLM (~16 GB — mind home quota;
+# move to a projects folder if /mnt/home fills up). See training/README.md.
+finetuned:
+  base_model: /mnt/projects/mlmi/reg2/models/Qwen3-VL-8B-Instruct
+  adapter_dir: /mnt/home/dogakonuk/lora/qwen3vl-uterus/adapter
+  merged_dir: /mnt/home/dogakonuk/lora/qwen3vl-uterus/merged
+
 extraction:
   # Repo script output (team root script writes report_parts_extracted.json at project_root)
   report_parts_json: /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/data/report_parts_extracted.json

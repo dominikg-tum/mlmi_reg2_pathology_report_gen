@@ -16,7 +16,9 @@ from baselines.agent_runner import (
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=["dummy", "qwen"], default="dummy")
+    parser.add_argument(
+        "--backend", choices=["dummy", "qwen", "finetuned"], default="dummy"
+    )
     parser.add_argument("--memory", default="flat")
     parser.add_argument("--visual", default="thumbnail")
     parser.add_argument("--retriever", default="none")
