@@ -52,18 +52,20 @@ submitted=0
 echo "Batch submitter: baseline=${BASELINE} split=${SPLIT} slide-index ${START}-${END}" >&2
 for idx in $(seq "${START}" "${END}"); do
   wait_for_slot
-out=$(
+
+  out=$(
     cd "${PINNED_REPO}" && sbatch \
-      --export=BASELINE="${BASELINE}",SPLIT="${SPLIT}" \
+      --export=NONE,BASELINE="${BASELINE}",SPLIT="${SPLIT}" \
       --array="${idx}" scripts/cluster/run_baseline_batch.sh
   )
   echo "${out} (slide-index ${idx})"
 
+  # --- CodeRabbit FIX START ---
   job_id=$(echo "${out}" | awk '{print $4}')
-
   while ! squeue -j "${job_id}" &>/dev/null; do
       sleep 2
   done
+  # --- CodeRabbit FIX END ---
 
   submitted=$((submitted + 1))
 done
