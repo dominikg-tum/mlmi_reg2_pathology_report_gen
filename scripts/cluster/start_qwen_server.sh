@@ -4,7 +4,7 @@
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.err
 
