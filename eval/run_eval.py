@@ -6,8 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
-from eval.metrics.chain import binary_path_validity, edge_f1, mess_score
-from eval.metrics.report import bleu4, clinical_accuracy_placeholder, rouge_l
+from eval.metrics.chain import binary_path_validity, edge_f1, mess_score, node_accuracy
+from eval.metrics.report import bleu4, clinical_accuracy_tokenf1, rouge_l, bert_score_f1, numeric_fidelity, \
+    negation_consistency
 from eval.schemas import CaseRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -28,10 +29,10 @@ def load_jsonl(path: Path) -> dict[str, CaseRecord]:
 
 
 def select_eval_keys(
-    preds: dict[str, CaseRecord],
-    gts: dict[str, CaseRecord],
-    *,
-    split: str = "",
+        preds: dict[str, CaseRecord],
+        gts: dict[str, CaseRecord],
+        *,
+        split: str = "",
 ) -> list[str]:
     """Return slide_ids present in both pred and gt, optionally filtered by gt split."""
     keys = sorted(set(preds) & set(gts))
@@ -62,7 +63,7 @@ def main() -> None:
             )
         raise SystemExit("No overlapping slide_ids between pred and gt")
 
-    bpvs, f1s, messes, rouges, bleus, clin = [], [], [], [], [], []
+    bpvs, f1s, messes, rouges, bleus, clin, node_acc, bert, num_fid, neg_score, neg_count = [], [], [], [], [], [], [], [], [], [], []
     for k in keys:
         p, g = preds[k], gts[k]
         bpvs.append(binary_path_validity(p, g))
@@ -70,16 +71,31 @@ def main() -> None:
         messes.append(mess_score(p, g))
         rouges.append(rouge_l(p.report, g.report))
         bleus.append(bleu4(p.report, g.report))
-        clin.append(clinical_accuracy_placeholder(p.report, g.report))
+        clin.append(clinical_accuracy_tokenf1(p.report, g.report))
+        node_acc.append(node_accuracy(p, g))
+        bert.append(bert_score_f1(p.report, g.report))
+        num_fid.append(numeric_fidelity(p.report, g.report))
+        score, count = negation_consistency(p.report, g.report)
+        neg_score.append(score)
+        neg_count.append(count)
 
     n = len(keys)
     print(f"Cases: {n}" + (f" (split={args.split})" if args.split else ""))
-    print(f"Binary Path Validity: {sum(bpvs)/n:.4f}")
-    print(f"Edge-F1:              {sum(f1s)/n:.4f}")
-    print(f"MESS:                 {sum(messes)/n:.4f}")
-    print(f"ROUGE-L:              {sum(rouges)/n:.4f}")
-    print(f"BLEU-4:               {sum(bleus)/n:.4f}")
-    print(f"Clinical (proxy):     {sum(clin)/n:.4f}")
+    print(f"Binary Path Validity: {sum(bpvs) / n:.4f}")
+    print(f"Edge-F1:              {sum(f1s) / n:.4f}")
+    print(f"MESS:                 {sum(messes) / n:.4f}")
+    print(f"ROUGE-L:              {sum(rouges) / n:.4f}")
+    print(f"BLEU-4:               {sum(bleus) / n:.4f}")
+    print(f"Clinical (proxy):     {sum(clin) / n:.4f}")
+    print(f"Node Accuracy:       {sum(node_acc) / n:.4f}")
+    print(f"BERT:                 {sum(bert) / n:.4f}")
+    print(f"Num. FID:             {sum(num_fid) / n:.4f}")
+    total_neg_count = sum(neg_count)
+    if total_neg_count == 0:
+        print("Negation Consistency:  N/A (no comparable keywords found)")
+    else:
+        weighted_neg = sum(s * c for s, c in zip(neg_score, neg_count)) / total_neg_count
+        print(f"Negation Consistency:  {weighted_neg:.4f}  (over {total_neg_count} comparable mentions)")
 
 
 if __name__ == "__main__":

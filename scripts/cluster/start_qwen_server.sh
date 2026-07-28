@@ -4,7 +4,7 @@
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_normal
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/qwen_server_%j.err
 
@@ -24,4 +24,5 @@ enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   python -m vllm.entrypoints.openai.api_server \
     --model "${MODEL}" \
     --served-model-name "${MODEL_NAME}" \
-    --port 8000
+    --port 8000 \
+    --max-model-len 8192

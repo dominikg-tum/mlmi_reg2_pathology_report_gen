@@ -1,14 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-baseline-batch
-#SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
-#SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:0
-#SBATCH --cpus-per-task=2
 #SBATCH --time=04:00:00
-#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/baseline_batch_%x_%A_%a.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/baseline_batch_%x_%A_%a.err
+#SBATCH --output=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.out
+#SBATCH --error=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.err
 #
 # Thumbnail baseline batch over test split (one slide per array task).
 #
@@ -37,7 +34,7 @@ BASELINE="${BASELINE:-a}"
 SPLIT="${SPLIT:-test}"
 
 # shellcheck source=load_paths.sh
-source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
+source ./scripts/cluster/load_paths.sh
 load_cluster_paths
 
 mkdir -p "${LOGS_DIR}"
