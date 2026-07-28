@@ -53,9 +53,9 @@ echo "Batch submitter: baseline=${BASELINE} split=${SPLIT} slide-index ${START}-
 for idx in $(seq "${START}" "${END}"); do
   wait_for_slot
 
-  out=$(
+out=$(
     cd "${PINNED_REPO}" && sbatch \
-      --export=NONE,BASELINE="${BASELINE}",SPLIT="${SPLIT}" \
+      --export=ALL,BASELINE="${BASELINE}",SPLIT="${SPLIT}" \
       --array="${idx}" scripts/cluster/run_baseline_batch.sh
   )
   echo "${out} (slide-index ${idx})"
