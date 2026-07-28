@@ -6,6 +6,8 @@
 #SBATCH --export=NONE
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
+# Student QoS: MaxJobsPU=2, MaxSubmitPU=2. Use generic GPU request (fair-share).
+# Do not --exclude (forbidden) or hard --nodelist / GPU-type pin (starves the queue).
 #SBATCH --gres=gpu:1
 #SBATCH --time=06:00:00
 #SBATCH --array=0-463
@@ -19,6 +21,22 @@ set -euo pipefail
 
 # Minimal PATH for enroot / python3 when submitted with --export=NONE.
 export PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:${PATH}}"
+
+# koblenz (TITAN RTX) previously killed offline jobs with RaisedSignal:53 in 0–2s.
+# Refuse fast so the MaxJobs=2 slot frees and the batch submitter can retry elsewhere.
+HOST="$(hostname -s 2>/dev/null || hostname)"
+if [[ "${HOST}" == "koblenz" ]]; then
+  echo "REFUSE node=${HOST}: TITAN RTX historically raises signal 53 for this pipeline."
+  echo "Exiting 75 so submitter can retry on another 24g node (no embedding written)."
+  exit 75
+fi
+if command -v nvidia-smi >/dev/null 2>&1; then
+  if nvidia-smi -L 2>/dev/null | grep -qi 'TITAN'; then
+    echo "REFUSE GPU on ${HOST}: TITAN device listed by nvidia-smi."
+    echo "Exiting 75 so submitter can retry on another 24g node (no embedding written)."
+    exit 75
+  fi
+fi
 
 PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
 export MLMI_PINNED_REPO="${PINNED_REPO}"
