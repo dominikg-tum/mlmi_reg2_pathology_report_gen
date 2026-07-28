@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-baseline-batch
 #SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
-#SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:0
