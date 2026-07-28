@@ -7,26 +7,32 @@
 #SBATCH --output=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.err
 #
-# Thumbnail baseline batch over test split (one slide per array task).
+# Thumbnail / patch baseline batch over test split (one CASE per array task).
+# Each case runs SS-LLM: full Phase 1 for every physical WSI, then merged case chain.
 #
 # Prerequisite: vLLM Qwen server running (sbatch scripts/cluster/start_qwen_server.sh)
 # and configs/paths.yaml qwen.api_base_url reachable from compute nodes.
 #
 # Usage:
-#   # 1) Write slide list and count tasks (N = lines - 1 for --array=0-N)
+#   # 1) Write case-key list and count tasks (N = lines - 1 for --array=0-N)
 #   python -m scripts.inference.run_baseline_batch --baseline a --split test \
-#     --write-slide-list /mnt/projects/mlmi/reg2/dominik/logs/baseline_test_slides.txt --dry-run
+#     --write-slide-list /mnt/projects/mlmi/reg2/dominik/logs/baseline_test_cases.txt --dry-run
 #
-#   # 2) Submit array (example: 70 test slides -> --array=0-69)
-#   BASELINE=a sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
+#   # 2) Submit array (example: 70 test cases -> --array=0-69)
+#   BASELINE=a sbatch --job-name=path-baseline-a-test --array=0-69 \
+#     scripts/cluster/run_baseline_batch.sh
 #
-#   BASELINE=b1 sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
-#   BASELINE=b2 sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
+#   BASELINE=b1 sbatch --job-name=path-baseline-b1-test --array=0-69 \
+#     scripts/cluster/run_baseline_batch.sh
+#   BASELINE=b2 sbatch --job-name=path-baseline-b2-test --array=0-69 \
+#     scripts/cluster/run_baseline_batch.sh
+#   BASELINE=naive sbatch --job-name=path-baseline-naive-test --array=0-69 \
+#     scripts/cluster/run_baseline_batch.sh
 #
 # Env:
-#   BASELINE=a|b1|b2   (default: a)
-#   SPLIT=test         (default: test)
-#   SLIDE_ID=CASE.svs  optional single-slide override (non-array)
+#   BASELINE=a|b1|b2|p0|p1|p2|p3|naive   (default: a)
+#   SPLIT=test                           (default: test)
+#   SLIDE_ID=<case_key>                  optional single-case override (GT slide_id string)
 
 set -euo pipefail
 
@@ -64,7 +70,7 @@ ${HYBRID_PIP}
     elif [[ -n '${SLURM_ARRAY_TASK_ID:-}' ]]; then
       ARGS+=(--slide-index '${SLURM_ARRAY_TASK_ID}')
     else
-      echo 'Set SLURM_ARRAY_TASK_ID (array job) or SLIDE_ID=CASE.svs' >&2
+      echo 'Set SLURM_ARRAY_TASK_ID (array job) or SLIDE_ID=<case_key>' >&2
       exit 1
     fi
     \"\${ARGS[@]}\"

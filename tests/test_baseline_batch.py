@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from extraction.case_ids import load_cases_from_chains
 from scripts.inference.run_baseline_batch import (
     BASELINES,
     default_runs_dir_for_baseline,
@@ -21,10 +22,27 @@ def test_load_slide_ids_filters_split(tmp_path: Path):
     assert load_slide_ids(chains, split="") == ["a.svs", "b.svs"]
 
 
+def test_load_slide_ids_keeps_comma_case_key(tmp_path: Path):
+    chains = tmp_path / "chains.jsonl"
+    rows = [
+        {
+            "slide_id": "a.svs,b.svs",
+            "split": "test",
+            "extraction_status": "ok",
+        },
+    ]
+    chains.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    assert load_slide_ids(chains, split="test") == ["a.svs,b.svs"]
+    cases = load_cases_from_chains(chains, split="test")
+    assert cases[0].physical_slides == ["a.svs", "b.svs"]
+
+
 def test_baseline_specs():
     assert BASELINES["a"].memory == "flat"
     assert BASELINES["b1"].memory == "hipporag2"
     assert BASELINES["b2"].memory == "hybridrag"
+    assert BASELINES["naive"].mode == "naive"
+    assert BASELINES["a"].mode == "graph"
 
 
 def test_default_runs_dir_for_baseline():

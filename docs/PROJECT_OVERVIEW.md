@@ -74,7 +74,7 @@ Build a system that, **given only a WSI at test time**, walks a **diagnostic gra
 | Report | Supervision (WP3 chains) + HippoRAG 2 index (train split only) | **Not available** |
 
 
-**WSI data:** `.svs` files under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` (~220 **cases**, ~460 **slides**, ~2 slides/case on average). Labels xlsx `slide_ids` is comma-separated per case (e.g. cervix + corpus + polyp blocks). Canonical path in `[configs/paths.yaml](../configs/paths.yaml)` → `cluster.data_dir`. **Inference today uses the first slide only** — see [§2f](#2f-multiple-wsis-per-case).
+**WSI data:** `.svs` files under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` (~220 **cases**, ~460 **slides**, ~2 slides/case on average). Labels xlsx `slide_ids` is comma-separated per case (e.g. cervix + corpus + polyp blocks). Canonical path in `[configs/paths.yaml](../configs/paths.yaml)` → `cluster.data_dir`. **Inference uses SS-LLM multi-WSI** (full graph per physical slide, case-level merge) — see [§2f](#2f-multiple-wsis-per-case).
 
 **Cluster-only assets** (not on local laptops — see [cluster_setup.md](cluster_setup.md)):
 
@@ -454,33 +454,45 @@ Your colleague is right about the **ontology alignment**: KEEP embeddings are tr
 
 ## 2f. Multiple WSIs per case
 
-One **case** in the labels spreadsheet maps to **one integrated pathology report**, but often **several** `.svs` **files** (separate tissue parts or paraffin blocks: cervix curettage, corpus curettage, polyp block, etc.). Agent papers we borrow from (SlideSeek, PathAgent, PathNavigate, MMNavAgent) all reason on **one gigapixel slide per run**; SlideSeek explicitly lists multi-slide fusion as **future work**. Our current baseline (first `slide_id` in the comma-separated list) matches PolyPath’s **SS-Random** single-slide baseline.
+One **case** in the labels spreadsheet maps to **one integrated pathology report**, but often **several** `.svs` **files** (separate tissue parts or paraffin blocks: cervix curettage, corpus curettage, polyp block, etc.). Agent papers we borrow from (SlideSeek, PathAgent, PathNavigate, MMNavAgent) all reason on **one gigapixel slide per run**; SlideSeek explicitly lists multi-slide fusion as **future work**.
+
+**Implemented (v1): SS-LLM.** Inference unit is the **case** (GT `slide_id` string from `chains.jsonl`, often comma-separated). Every ablation (`a`/`b1`/`b2`/`p0`–`p3`/`naive`) loops physical WSIs, then merges.
 
 
-|             | Training                                  | Inference (target)                                 |
-| ----------- | ----------------------------------------- | -------------------------------------------------- |
-| Unit        | Case-level report in xlsx                 | **All WSIs for the case** (not first slide only)   |
-| Supervision | One `english_reports` per row             | No report at test time                             |
-| Eval        | Match preds to report by `slide_id` today | Prefer **case-level** scoring when fusion is wired |
+|             | Training                                  | Inference (current)                                              |
+| ----------- | ----------------------------------------- | ---------------------------------------------------------------- |
+| Unit        | Case-level report in xlsx                 | **All WSIs for the case** (SS-LLM)                               |
+| Supervision | One `english_reports` per row             | No report at test time                                           |
+| Eval        | Match preds by GT `slide_id`              | Case-level predicted chain + report keyed by the same GT string |
 
 
 Manifest: `data/manifests/cases.csv` (`case_id`, `slide_ids`, `n_slides`) via `scripts/data/build_manifest.py`.
 
-### Two planned fusion approaches (not implemented)
+Helpers: `extraction/case_ids.py` (`parse_slide_ids`, `CaseSpec`, `load_cases_from_chains`).
 
-Neither is wired in code yet. Both replace “first slide only” when multi-slide cases matter.
+### Run layout
 
-#### A. SS-LLM-style — per-slide chain → text merge (cheap, graph-friendly)
+```text
+runs/{baseline_name}/{case_key}/
+  cot_chain.json          # merged case chain (eval key = case_key)
+  report.txt              # Phase 2 CAP report (after run_phase2)
+  slides/{physical}.svs/
+    cot_chain.json        # per-slide Phase 1
+```
+
+Batch arrays (`scripts/cluster/run_baseline_batch.sh`) index **cases**, not physical slides. `--slide-id` / `SLIDE_ID` means the GT case key.
+
+### Two fusion approaches
+
+#### A. SS-LLM-style — per-slide chain → text merge (IMPLEMENTED)
 
 **Lineage:** PolyPath baselines **SS-Random** / **SS-LLM** ([arXiv:2502.10536](https://arxiv.org/abs/2502.10536)); fits our existing Phase 1 → Phase 2 split.
 
-**Flow:**
+**Flow (wired):**
 
-1. For each WSI in `slide_ids`: run **full graph traversal** → `runs/{slide_id}/cot_chain.json` (and optional per-slide mini-report).
-2. **Merge at text only** before or inside Phase 2:
-  - **Pick:** LLM chooses the most clinically significant per-slide chain/report (PolyPath SS-LLM; no images in merge step).
-  - **Synthesize:** MedGemma (or Qwen text) writes one case report from all chains + slide index labels (e.g. “slide 1 = cervix, slide 2 = corpus”).
-3. Optional: prefix each chain step with `slide_id` for REG² edge parsing.
+1. For each physical WSI in `parse_slide_ids(case_key)`: run **full graph traversal** (or naive one-shot) → `runs/.../slides/{physical}/cot_chain.json`.
+2. **Synthesize merge** in Phase 2 (`agent/report_writer.py`): MedGemma writes one case report from all chains labeled by `slide_id`. Mean TITAN embedding across slides for the projector prefix.
+3. Case-level `cot_chain.json` concatenates steps with `[slide_id]` prefixes for REG² edge parsing. Eval join key = full GT `slide_id` string.
 
 
 | Pros                                                          | Cons                                                                                     |
@@ -488,10 +500,7 @@ Neither is wired in code yet. Both replace “first slide only” when multi-sli
 | Reuses offline cache + graph as-is; 2–3× Phase 1 only         | Merge can drop cross-slide visual conflicts                                              |
 | No long-context VLM; works with **MedGemma chain-only** today | Per-slide graph may mis-route on wrong tissue (cervix slide answering endometrium nodes) |
 | Deterministic chains per slide → auditable                    | SS-LLM merge is text-only; no re-grounding in pixels                                     |
-| Natural first upgrade from current pipeline                   |                                                                                          |
-
-
-**Suggested order:** implement after single-slide Phase 1/2 baseline is stable; try **synthesize** merge into Phase 2 before **pick**-only.
+| Native for all batch ablations                                |                                                                                          |
 
 #### B. PolyPath-style — long-context patch fusion (report-centric, vision-heavy)
 
@@ -527,7 +536,7 @@ Neither is wired in code yet. Both replace “first slide only” when multi-sli
 | **Cluster fit (A100, staged models)** | ✅ **First target**                   | ⚠️ Later — context / patch budget engineering          |
 
 
-**Practical recommendation:** Ship **SS-LLM-style** as the multi-slide v1 (minimal code: loop `slide_ids`, merge in `report_writer.py`). Treat **PolyPath-style** as Phase 2 multimodal or a separate report track once patch budgets and case-level eval are defined. Intermediate hack: **pooled CONCH retrieval** across slides (one virtual patch pool) without full PolyPath token count — see [WSI_Patching_Retrieval_Research.md](WSI_Patching_Retrieval_Research.md).
+**Status:** **SS-LLM-style** is the default multi-slide path (`run_case_phase1`, `run_phase2`, `run_baseline_batch`). Treat **PolyPath-style** as a later Phase 2 multimodal / report track once patch budgets and case-level eval variants are defined. Intermediate hack: **pooled CONCH retrieval** across slides (one virtual patch pool) without full PolyPath token count — see [WSI_Patching_Retrieval_Research.md](WSI_Patching_Retrieval_Research.md).
 
 ---
 

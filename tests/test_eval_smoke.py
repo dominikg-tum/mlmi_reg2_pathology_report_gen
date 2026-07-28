@@ -47,3 +47,10 @@ def test_select_eval_keys_filters_by_gt_split():
     assert select_eval_keys(preds, gts, split="test") == ["test.svs"]
     assert select_eval_keys(preds, gts, split="train") == ["train.svs"]
     assert select_eval_keys(preds, gts, split="val") == []
+
+
+def test_select_eval_keys_comma_separated_case_key():
+    key = "a.svs,b.svs"
+    preds = {key: CaseRecord(slide_id=key)}
+    gts = {key: CaseRecord(slide_id=key, split="test")}
+    assert select_eval_keys(preds, gts, split="test") == [key]

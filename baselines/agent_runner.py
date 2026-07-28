@@ -17,7 +17,14 @@ from agent.backends import (
 )
 from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
+from agent.report_writer import merge_case_chains, write_merged_case_chain
 from agent.types import Step
+from extraction.case_ids import (
+    CaseSpec,
+    case_run_dir,
+    case_spec_from_key,
+    physical_run_dir,
+)
 from vision.cache import SlideCache, build_slide_cache
 from vision.thumbnail import _resolve_wsi_path
 
@@ -159,3 +166,90 @@ def write_phase1_outputs(
             json.dumps(result.retrieval_log, indent=2) + "\n"
         )
     return chain_path
+
+
+def write_phase1_outputs_to_dir(
+    result: AgentRunResult,
+    out_dir: Path,
+) -> Path:
+    """Write Phase 1 artifacts into an explicit directory (case/slides layout)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    chain_path = out_dir / "cot_chain.json"
+    chain_path.write_text(json.dumps(result.chain, indent=2) + "\n")
+    report = str(result.chain.get("report", "") or "").strip()
+    report_path = out_dir / "report.txt"
+    if report:
+        report_path.write_text(report + "\n")
+    else:
+        report_path.unlink(missing_ok=True)
+    if result.retrieval_log:
+        (out_dir / "retrieval_log.json").write_text(
+            json.dumps(result.retrieval_log, indent=2) + "\n"
+        )
+    return chain_path
+
+
+def run_case_phase1(
+    case: CaseSpec | str,
+    *,
+    runs_dir: Path,
+    backend: str = "qwen",
+    memory: str = "flat",
+    visual: str = "thumbnail",
+    retriever: str = "none",
+    navigator: str = "graph_guided",
+    skip_report_nodes: bool = False,
+    search_all_patches: bool | None = None,
+    node_react: bool = False,
+    structured_answer: bool = False,
+    paired_regions: bool = False,
+    skip_existing: bool = False,
+    cache_root: Path | None = None,
+    wsi_data_dir: Path | None = None,
+) -> Path:
+    """SS-LLM Phase 1: full graph per physical WSI, then merge case cot_chain.json."""
+    if isinstance(case, str):
+        case = case_spec_from_key(case)
+
+    case_dir = case_run_dir(runs_dir, case.case_key)
+    case_chain_path = case_dir / "cot_chain.json"
+
+    def _all_physical_chains_exist() -> bool:
+        return all(
+            (physical_run_dir(runs_dir, case.case_key, pid) / "cot_chain.json").exists()
+            for pid in case.physical_slides
+        )
+
+    # Only skip when case merge AND every physical slide chain are present.
+    if skip_existing and case_chain_path.exists() and _all_physical_chains_exist():
+        return case_chain_path
+
+    chains: list[dict[str, Any]] = []
+    for physical_id in case.physical_slides:
+        phys_dir = physical_run_dir(runs_dir, case.case_key, physical_id)
+        phys_chain = phys_dir / "cot_chain.json"
+        if skip_existing and phys_chain.exists():
+            chains.append(json.loads(phys_chain.read_text()))
+            continue
+
+        result = run_agent_traversal(
+            backend=backend,
+            memory=memory,
+            visual=visual,
+            retriever=retriever,
+            navigator=navigator,
+            slide_id=physical_id,
+            cache_root=cache_root,
+            wsi_data_dir=wsi_data_dir,
+            skip_report_nodes=skip_report_nodes,
+            search_all_patches=search_all_patches,
+            node_react=node_react,
+            structured_answer=structured_answer,
+            paired_regions=paired_regions,
+        )
+        write_phase1_outputs_to_dir(result, phys_dir)
+        chains.append(result.chain)
+
+    merged = merge_case_chains(chains, case.physical_slides, case.case_key)
+    write_merged_case_chain(case_chain_path, merged)
+    return case_chain_path
