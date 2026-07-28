@@ -24,4 +24,5 @@ enroot start --root --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   python -m vllm.entrypoints.openai.api_server \
     --model "${MODEL}" \
     --served-model-name "${MODEL_NAME}" \
-    --port 8000
+    --port 8000 \
+    --max-model-len 8192
