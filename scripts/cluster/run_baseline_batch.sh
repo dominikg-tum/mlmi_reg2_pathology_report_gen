@@ -5,7 +5,7 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:0
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=1
 #SBATCH --time=04:00:00
 #SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/baseline_batch_%x_%A_%a.out
 #SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/baseline_batch_%x_%A_%a.err
