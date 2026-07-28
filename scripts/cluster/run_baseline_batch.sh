@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-baseline-batch
-#SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:0
@@ -35,7 +34,7 @@ BASELINE="${BASELINE:-a}"
 SPLIT="${SPLIT:-test}"
 
 # shellcheck source=load_paths.sh
-source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
+source ./scripts/cluster/load_paths.sh
 load_cluster_paths
 
 mkdir -p "${LOGS_DIR}"
