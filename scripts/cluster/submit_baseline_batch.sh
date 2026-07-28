@@ -54,10 +54,17 @@ for idx in $(seq "${START}" "${END}"); do
   wait_for_slot
   out=$(
     cd "${PINNED_REPO}" && BASELINE="${BASELINE}" SPLIT="${SPLIT}" sbatch \
-      --export=ALL,SLIDE_ID= \
+      --export=BASELINE,SPLIT,SLIDE_ID= \
       --array="${idx}" scripts/cluster/run_baseline_batch.sh
   )
   echo "${out} (slide-index ${idx})"
+
+  job_id=$(echo "${out}" | awk '{print $4}')
+
+  while ! squeue -j "${job_id}" &>/dev/null; do
+      sleep 2
+  done
+
   submitted=$((submitted + 1))
 done
 
