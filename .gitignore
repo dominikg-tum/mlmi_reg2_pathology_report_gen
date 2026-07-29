@@ -225,6 +225,13 @@ data/*
 !data/manifests/**
 !data/**/README.md
 
+# Curated RAG reference chunks are source, not artifacts: the b2_cap arm is only
+# reproducible if every clone builds from the same corpus. Built indexes stay ignored.
+!data/memory/
+data/memory/*
+!data/memory/reference/
+!data/memory/reference/**
+
 # Large PDF references (keep locally; markdown docs are tracked)
 docs/*.pdf
 
