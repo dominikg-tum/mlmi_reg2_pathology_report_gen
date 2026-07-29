@@ -479,6 +479,14 @@ python extraction/qa_extractor.py
 
 # Full report-parts extraction (batch over the xlsx → data/report_parts_extracted.json)
 python extraction/extract_report_parts.py
+
+# Canonical train/test: cases.csv is authority. Restamp gitignored chains.jsonl splits
+# (cluster artifact under data/labels/), then rebuild RAG. Ping Nick before FORCE_REBUILD
+# on the shared chroma path in configs/paths.yaml.
+python -m scripts.data.restamp_chains_splits --dry-run
+python -m scripts.data.restamp_chains_splits --backup data/labels/chains.jsonl.bak
+FORCE_REBUILD=1 sbatch scripts/cluster/build_hybridrag_index.sh
+sbatch scripts/cluster/build_hipporag_index.sh
 ```
 
 Python client pattern (same as `extraction/qa_extractor.py`):

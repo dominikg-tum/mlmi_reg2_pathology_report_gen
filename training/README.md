@@ -5,12 +5,18 @@ answers each graph node from the retrieved patches better than zero-shot.
 
 Pipeline (mirrors inference for train/serve parity):
 
-1. WP3 chains → `data/labels/chains.jsonl` (`scripts/cluster/build_chains.sh`)
+1. WP3 chains → `data/labels/chains.jsonl` (`scripts/cluster/build_chains.sh`), with
+   **`split` restamped from `data/manifests/cases.csv`**
+   (`python -m scripts.data.restamp_chains_splits`). Do not train on an unrestamped file.
 2. `training/dataset.py::build_training_jsonl` — replay the **same** `--visual patch_retrieve`
    + `graph_guided` pathway per GT node → `training/samples.jsonl`
 3. `training/lora.py::train_lora` — multimodal LoRA SFT (transformers + peft + trl)
 4. Serve: merge adapter → vLLM (`ZeroShotQwenBackend`) **or** `FineTunedBackend` (HF)
-5. `scripts/training/eval_finetuned.py` — answer-key accuracy vs base on the test split
+5. `scripts/training/eval_finetuned.py` — answer-key accuracy vs base on the **stamped test** split
+
+**After a chains restamp:** rebuild `samples.jsonl` and retrain LoRA for clean `cases.csv` test
+numbers. Keep any previous adapter labeled as a **legacy-split ablation** only (it may have
+seen cases that `cases.csv` now marks test).
 
 Slides whose offline embeddings are missing are skipped per-node (logged to stderr with
 a summary), so a partially-encoded cache never aborts the whole build. Slide ids in

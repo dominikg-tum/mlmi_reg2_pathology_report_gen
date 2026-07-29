@@ -112,9 +112,16 @@ f = p.get("finetuned", {})
 def emit(key, value):
     print(f'{key}="{value}"')
 
+from pathlib import Path
+
+pinned = Path(u.get("pinned_repo_dir", "") or "")
+repo_path = str(pinned) if pinned.is_dir() else r["path"]
+
 emit("PROJECT_ROOT", c["project_root"])
-emit("REPO", r["path"])
+emit("REPO", repo_path)
+emit("PINNED_REPO", str(pinned) if pinned.is_dir() else "")
 emit("CONTAINER", u["container_sqsh"])
+emit("PERSONAL_CONTAINER", u.get("personal_container_sqsh", u["container_sqsh"]))
 emit("LOGS_DIR", u["logs_dir"])
 emit("WORK_DIR", u["work_dir"])
 emit("MODEL", q["model_path"])

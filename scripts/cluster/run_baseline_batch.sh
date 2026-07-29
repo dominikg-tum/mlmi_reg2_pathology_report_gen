@@ -1,49 +1,72 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-baseline-batch
+#SBATCH --chdir=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
+#SBATCH --export=NONE
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
-#SBATCH --gres=gpu:0
+# Request a GPU even though the baseline client is CPU-side (Qwen is a
+# separate job). Campus opportunistic jobs without --gres get stuck as
+# "user env retrieval failed requeued held".
+#SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
-#SBATCH --output=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.err
+#SBATCH --output=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/baseline_batch_%x_%j.out
+#SBATCH --error=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/baseline_batch_%x_%j.err
 #
 # Thumbnail / patch baseline batch over test split (one CASE per array task).
 # Each case runs SS-LLM Pick: Phase 1 per WSI, then one selected case chain.
 #
 # Prerequisite: vLLM Qwen server running (sbatch scripts/cluster/start_qwen_server.sh)
-# and configs/paths.yaml qwen.api_base_url reachable from compute nodes.
+# and logs/qwen_server_url.txt pointing at that node (written by the server job).
 #
 # Usage:
-#   # 1) Write case-key list and count tasks (N = lines - 1 for --array=0-N)
-#   python -m scripts.inference.run_baseline_batch --baseline a --split test \
-#     --write-slide-list /mnt/projects/mlmi/reg2/dominik/logs/baseline_test_cases.txt --dry-run
+#   # Smoke one case by key:
+#   sbatch --export=NONE,BASELINE=a,SPLIT=test,BACKEND=qwen,SLIDE_ID='CASE.svs,...',MLMI_PINNED_REPO=... \
+#     scripts/cluster/run_baseline_batch.sh
 #
-#   # 2) Submit array (example: 70 test cases -> --array=0-69)
+#   # Full test array (count test cases in stamped chains.jsonl, then --array=0-(N-1)):
+#   # After cases.csv restamp expect ~70 test cases -> --array=0-69
 #   BASELINE=a sbatch --job-name=path-baseline-a-test --array=0-69 \
-#     scripts/cluster/run_baseline_batch.sh
-#
-#   BASELINE=b1 sbatch --job-name=path-baseline-b1-test --array=0-69 \
-#     scripts/cluster/run_baseline_batch.sh
-#   BASELINE=b2 sbatch --job-name=path-baseline-b2-test --array=0-69 \
-#     scripts/cluster/run_baseline_batch.sh
-#   BASELINE=naive sbatch --job-name=path-baseline-naive-test --array=0-69 \
+#     --export=NONE,BASELINE=a,SPLIT=test,MLMI_PINNED_REPO=... \
 #     scripts/cluster/run_baseline_batch.sh
 #
 # Env:
 #   BASELINE=a|b1|b2|p0|p1|p2|p3|naive   (default: a)
 #   SPLIT=test                           (default: test)
 #   SLIDE_ID=<case_key>                  optional single-case override (GT slide_id string)
+#   BACKEND=qwen|dummy|finetuned         (default: qwen)
 
 set -euo pipefail
 
+export PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:${PATH}}"
+
+PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
+export MLMI_PINNED_REPO="${PINNED_REPO}"
+
 BASELINE="${BASELINE:-a}"
 SPLIT="${SPLIT:-test}"
+BACKEND="${BACKEND:-qwen}"
+SLIDE_ID="${SLIDE_ID:-}"
+ARRAY_TASK_ID="${SLURM_ARRAY_TASK_ID:-}"
+# Optional numeric index when SLIDE_ID cannot be passed via --export (commas break SLURM export).
+SLIDE_INDEX="${SLIDE_INDEX:-}"
 
 # shellcheck source=load_paths.sh
-source ./scripts/cluster/load_paths.sh
-load_cluster_paths
+source "${PINNED_REPO}/scripts/cluster/load_paths.sh"
+load_cluster_paths "${PINNED_REPO}/configs/paths.yaml"
+REPO="${PINNED_REPO}"
 
 mkdir -p "${LOGS_DIR}"
+
+# Prefer the live server URL file over paths.yaml localhost.
+if [[ -f "${LOGS_DIR}/qwen_server_url.txt" ]]; then
+  QWEN_API_BASE_URL="$(tr -d '[:space:]' < "${LOGS_DIR}/qwen_server_url.txt")"
+  export QWEN_API_BASE_URL
+fi
+if [[ -n "${QWEN_API_BASE_URL:-}" ]]; then
+  echo "Using QWEN_API_BASE_URL=${QWEN_API_BASE_URL}"
+else
+  echo "WARNING: no QWEN_API_BASE_URL / qwen_server_url.txt; client will use paths.yaml localhost" >&2
+fi
 
 CONTAINER="${PERSONAL_CONTAINER:-${CONTAINER}}"
 
@@ -52,26 +75,40 @@ if [[ "${BASELINE}" == "b2" ]]; then
   HYBRID_PIP="$(cluster_hybridrag_pip_snippet)"
 fi
 
+# Build argv outside enroot so set -u / array vs SLIDE_ID is handled here.
+ARGS_FILE="$(mktemp "${TMPDIR:-/tmp}/baseline_args.XXXXXX")"
+{
+  echo "--baseline"
+  echo "${BASELINE}"
+  echo "--split"
+  echo "${SPLIT}"
+  echo "--backend"
+  echo "${BACKEND}"
+  echo "--skip-existing"
+  if [[ -n "${SLIDE_ID}" ]]; then
+    echo "--slide-id"
+    echo "${SLIDE_ID}"
+  elif [[ -n "${ARRAY_TASK_ID}" ]]; then
+    echo "--slide-index"
+    echo "${ARRAY_TASK_ID}"
+  elif [[ -n "${SLIDE_INDEX}" ]]; then
+    echo "--slide-index"
+    echo "${SLIDE_INDEX}"
+  else
+    echo "Set SLURM_ARRAY_TASK_ID, SLIDE_INDEX, or SLIDE_ID=<case_key>" >&2
+    exit 1
+  fi
+} > "${ARGS_FILE}"
+
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
+  --env "QWEN_API_BASE_URL=${QWEN_API_BASE_URL:-}" \
   "${CONTAINER}" \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
     pip install -q openai pyyaml pandas openpyxl 2>/dev/null || true
 ${HYBRID_PIP}
-    ARGS=(
-      python -m scripts.inference.run_baseline_batch
-      --baseline '${BASELINE}'
-      --split '${SPLIT}'
-      --skip-existing
-    )
-    if [[ -n '${SLIDE_ID:-}' ]]; then
-      ARGS+=(--slide-id '${SLIDE_ID}')
-    elif [[ -n '${SLURM_ARRAY_TASK_ID:-}' ]]; then
-      ARGS+=(--slide-index '${SLURM_ARRAY_TASK_ID}')
-    else
-      echo 'Set SLURM_ARRAY_TASK_ID (array job) or SLIDE_ID=<case_key>' >&2
-      exit 1
-    fi
-    \"\${ARGS[@]}\"
+    mapfile -t ARGS < '${ARGS_FILE}'
+    python -m scripts.inference.run_baseline_batch \"\${ARGS[@]}\"
   "
+rm -f "${ARGS_FILE}"

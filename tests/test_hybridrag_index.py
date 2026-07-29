@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from extraction.labels_io import load_case_splits, _disk_and_slide_to_case
 from memory.hybridrag import (
     HybridRAGMemory,
     compute_corpus_fingerprint,
@@ -24,7 +25,7 @@ def _labels_dataframe(n: int = 4) -> pd.DataFrame:
     for i in range(n):
         rows.append(
             {
-                "slide_ids": f"TUM_Uterus_{i:04d}.svs",
+                "slide_ids": f"disk_{i:04d}.svs",
                 "english_reports": f"Report text for slide {i}",
             }
         )
@@ -35,16 +36,49 @@ def _write_mini_xlsx(path: Path, n: int = 4) -> None:
     path.write_bytes(b"placeholder")
 
 
+def _write_split_fixtures(tmp_path: Path, n: int = 6, *, n_test: int = 2) -> tuple[Path, Path]:
+    """Write cases.csv + wsi_name_map.csv for disk_0000.. matching _labels_dataframe."""
+    cases = tmp_path / "cases.csv"
+    name_map = tmp_path / "wsi_name_map.csv"
+    with cases.open("w", encoding="utf-8") as handle:
+        handle.write("case_id,slide_ids,case_class,disease_label,split,n_slides\n")
+        for i in range(n):
+            split = "test" if i < n_test else "train"
+            handle.write(
+                f"p{i:04d},TUM_Uterus_{i:04d}.svs,,label,{split},1\n"
+            )
+    with name_map.open("w", encoding="utf-8") as handle:
+        handle.write(
+            "wsi_index,tum_num,slide_id,disk_name,specimen_slide_id,case_key,"
+            "block_id,img_id,tum_image_id,disease_label,report_duplicate\n"
+        )
+        for i in range(n):
+            handle.write(
+                f"{i},{i:04d},TUM_Uterus_{i:04d}.svs,disk_{i:04d}.svs,"
+                f"TUM_Uterus_{i:04d}_p{i:04d}_A.svs,p{i:04d},A,,,label,0\n"
+            )
+    load_case_splits.cache_clear()
+    _disk_and_slide_to_case.cache_clear()
+    return cases, name_map
+
+
 def test_load_report_documents_assigns_train_test_split(tmp_path: Path, monkeypatch):
     xlsx = tmp_path / "labels.xlsx"
     _write_mini_xlsx(xlsx, n=6)
     monkeypatch.setattr(pd, "read_excel", lambda _path: _labels_dataframe(6))
+    cases, name_map = _write_split_fixtures(tmp_path, n=6, n_test=2)
 
-    train_docs = load_report_documents(xlsx, split="train")
-    test_docs = load_report_documents(xlsx, split="test")
+    train_docs = load_report_documents(
+        xlsx, split="train", cases_csv=cases, name_map_csv=name_map
+    )
+    test_docs = load_report_documents(
+        xlsx, split="test", cases_csv=cases, name_map_csv=name_map
+    )
 
-    assert len(train_docs) + len(test_docs) == 6
+    assert len(train_docs) == 4
+    assert len(test_docs) == 2
     assert all(doc["page_content"].startswith("Report text") for doc in train_docs + test_docs)
+    assert all(doc["metadata"].get("case_key") for doc in train_docs + test_docs)
 
 
 def test_hybridrag_manifest_roundtrip(tmp_path: Path):
@@ -215,10 +249,26 @@ def test_corpus_fingerprint_stable_and_sensitive_to_corpus(tmp_path: Path):
     assert read_corpus_fingerprint(chroma)["digest"] == fp1["digest"]
 
 
+def _patch_report_docs_with_fixtures(tmp_path: Path, monkeypatch, *, n: int = 4, n_test: int = 1):
+    cases, name_map = _write_split_fixtures(tmp_path, n=n, n_test=n_test)
+
+    def _load(path, *, split="train", cases_csv=None, name_map_csv=None):
+        return load_report_documents(
+            path,
+            split=split,
+            cases_csv=cases_csv or cases,
+            name_map_csv=name_map_csv or name_map,
+        )
+
+    monkeypatch.setattr("memory.hybridrag.load_report_documents", _load)
+    return cases, name_map
+
+
 def test_build_index_rejects_mismatched_fingerprint(tmp_path: Path, monkeypatch):
     xlsx = tmp_path / "labels.xlsx"
     _write_mini_xlsx(xlsx)
     monkeypatch.setattr(pd, "read_excel", lambda _path: _labels_dataframe(4))
+    _patch_report_docs_with_fixtures(tmp_path, monkeypatch, n=4, n_test=1)
 
     chroma = tmp_path / "chroma_db"
     chroma.mkdir()
@@ -243,6 +293,7 @@ def test_build_index_rejects_missing_fingerprint(tmp_path: Path, monkeypatch):
     xlsx = tmp_path / "labels.xlsx"
     _write_mini_xlsx(xlsx)
     monkeypatch.setattr(pd, "read_excel", lambda _path: _labels_dataframe(4))
+    _patch_report_docs_with_fixtures(tmp_path, monkeypatch, n=4, n_test=1)
 
     chroma = tmp_path / "chroma_db"
     chroma.mkdir()
@@ -255,11 +306,14 @@ def test_build_index_loads_chroma_when_fingerprint_matches(tmp_path: Path, monke
     xlsx = tmp_path / "labels.xlsx"
     _write_mini_xlsx(xlsx)
     monkeypatch.setattr(pd, "read_excel", lambda _path: _labels_dataframe(4))
+    cases, name_map = _patch_report_docs_with_fixtures(tmp_path, monkeypatch, n=4, n_test=1)
 
     chroma = tmp_path / "chroma_db"
     chroma.mkdir()
     ref_dir = tmp_path / "reference"
-    report_docs = load_report_documents(xlsx, split="train")
+    report_docs = load_report_documents(
+        xlsx, split="train", cases_csv=cases, name_map_csv=name_map
+    )
     fingerprint = compute_corpus_fingerprint(
         source_path=xlsx,
         split="train",

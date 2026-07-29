@@ -4,13 +4,13 @@
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
-#SBATCH --gres=gpu:0
-#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
 #SBATCH --time=02:00:00
-#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/build_hipporag_%j.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/build_hipporag_%j.err
+#SBATCH --output=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/build_hipporag_%j.out
+#SBATCH --error=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/build_hipporag_%j.err
 #
-# Build HippoRAG2 embedding index from train-split chains.jsonl.
+# Build HippoRAG2 embedding index from train-split chains.jsonl
+# (splits must be restamped from cases.csv).
 #
 # Usage:
 #   sbatch scripts/cluster/build_hipporag_index.sh

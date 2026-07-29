@@ -21,7 +21,7 @@ import yaml
 from graph.schema import Node, Tier
 import pandas as pd
 
-from extraction.labels_io import assign_splits
+from extraction.labels_io import lookup_case_split
 from memory.base import SemanticMemory
 
 # Path to repository root directory
@@ -324,8 +324,14 @@ def load_report_documents(
     train_reports_path: str | Path,
     *,
     split: str = "train",
+    cases_csv: str | Path | None = None,
+    name_map_csv: str | Path | None = None,
 ) -> list[ReportDocument]:
-    """Load train-split report documents from the labels xlsx."""
+    """Load case reports from the labels xlsx filtered by ``cases.csv`` split.
+
+    Split authority is ``data/manifests/cases.csv`` (via wsi_name_map), not
+    row-index RNG over the spreadsheet.
+    """
     path = Path(train_reports_path)
     if not path.exists():
         raise FileNotFoundError(f"RAG: Reports Excel not found at '{path}'")
@@ -334,23 +340,26 @@ def load_report_documents(
     if "english_reports" not in df.columns:
         raise ValueError("RAG: labels xlsx missing column 'english_reports'")
 
-    splits = assign_splits(len(df))
-    if "split" not in df.columns:
-        df = df.copy()
-        df["split"] = [splits.get(int(i), "train") for i in range(len(df))]
-
-    df = df.dropna(subset=["english_reports"])
-    df = df[df["split"] == split]
+    cases_s = str(cases_csv) if cases_csv else None
+    map_s = str(name_map_csv) if name_map_csv else None
 
     documents: list[ReportDocument] = []
     for index, row in df.iterrows():
-        text = str(row["english_reports"])
+        report_val = row["english_reports"]
+        if pd.isna(report_val) or not str(report_val).strip():
+            continue
         slide_id = str(row.get("slide_ids", index))
+        if not slide_id or slide_id.lower() in ("nan", "n.a.", "na"):
+            continue
+        lookup = lookup_case_split(slide_id, cases_csv=cases_s, name_map_csv=map_s)
+        if not lookup.mapped or lookup.split != split:
+            continue
         documents.append(
             {
-                "page_content": text,
+                "page_content": str(report_val),
                 "metadata": {
                     "slide_id": slide_id,
+                    "case_key": lookup.case_key,
                     "source_type": "case_report",
                 },
             }

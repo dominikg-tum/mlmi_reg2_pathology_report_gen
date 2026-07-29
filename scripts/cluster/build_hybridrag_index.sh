@@ -5,16 +5,17 @@
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
 #SBATCH --time=04:00:00
-#SBATCH --output=/mnt/projects/mlmi/reg2/dominik/logs/build_hybridrag_%j.out
-#SBATCH --error=/mnt/projects/mlmi/reg2/dominik/logs/build_hybridrag_%j.err
+#SBATCH --output=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/build_hybridrag_%j.out
+#SBATCH --error=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/build_hybridrag_%j.err
 #
 # Build HybridRAG Chroma + BM25 index from train-split labels xlsx + reference chunks.
+# Split filter uses cases.csv (via wsi_name_map), not xlsx row RNG.
 #
 # Usage:
 #   sbatch scripts/cluster/build_hybridrag_index.sh
 #   FORCE_REBUILD=1 sbatch scripts/cluster/build_hybridrag_index.sh
+# Coordinate before FORCE_REBUILD on the shared chroma path (Nick).
 
 set -euo pipefail
 
