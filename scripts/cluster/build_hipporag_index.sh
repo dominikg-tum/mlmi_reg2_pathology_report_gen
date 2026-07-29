@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-build-hipporag
-#SBATCH --chdir=/mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
-#SBATCH --export=ALL
+#SBATCH --chdir=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
+#SBATCH --export=NONE
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
@@ -13,16 +13,21 @@
 # (splits must be restamped from cases.csv).
 #
 # Usage:
-#   sbatch scripts/cluster/build_hipporag_index.sh
-#   SPLIT=train sbatch scripts/cluster/build_hipporag_index.sh
+#   sbatch --export=NONE,SPLIT=train scripts/cluster/build_hipporag_index.sh
 
 set -euo pipefail
+
+export PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:${PATH}}"
+
+PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
+export MLMI_PINNED_REPO="${PINNED_REPO}"
 
 SPLIT="${SPLIT:-train}"
 
 # shellcheck source=load_paths.sh
-source /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/scripts/cluster/load_paths.sh
-load_cluster_paths
+source "${PINNED_REPO}/scripts/cluster/load_paths.sh"
+load_cluster_paths "${PINNED_REPO}/configs/paths.yaml"
+REPO="${PINNED_REPO}"
 
 mkdir -p "${LOGS_DIR}"
 
