@@ -43,4 +43,26 @@ rsync -avz -e "ssh -o ForwardX11=no" "${DRY_RUN[@]}" \
   "${LOCAL_REPO_ROOT}/" "${CLUSTER_SSH_HOST}:${PINNED_REPO}/"
 
 _cluster_ssh "chmod +x '${PINNED_REPO}/scripts/cluster/'*.sh '${PINNED_REPO}/scripts/local/'*.sh 2>/dev/null || true"
+
+# chains.jsonl is gitignored and built on the cluster, so rsync can never create
+# it from the laptop. Seed it from the shared clone when pinned is missing/stale.
+if [[ ${#DRY_RUN[@]} -eq 0 ]]; then
+  _cluster_ssh "bash -s" <<EOF || echo "WARNING: could not seed chains.jsonl" >&2
+set -u
+PIN_CHAINS='${PINNED_REPO}/data/labels/chains.jsonl'
+TEAM_CHAINS='${SHARED_REPO}/data/labels/chains.jsonl'
+if [[ ! -f "\$TEAM_CHAINS" ]]; then
+  echo "chains: no source at \$TEAM_CHAINS (skipped)"
+  exit 0
+fi
+if [[ ! -f "\$PIN_CHAINS" ]] || [[ "\$TEAM_CHAINS" -nt "\$PIN_CHAINS" ]]; then
+  mkdir -p "\$(dirname "\$PIN_CHAINS")"
+  cp -a "\$TEAM_CHAINS" "\$PIN_CHAINS"
+  echo "chains: seeded pinned from shared clone (\$(wc -l < "\$PIN_CHAINS") rows)"
+else
+  echo "chains: pinned already up to date (\$(wc -l < "\$PIN_CHAINS") rows)"
+fi
+EOF
+fi
+
 echo "Done."
