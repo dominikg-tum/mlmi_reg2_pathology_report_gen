@@ -475,7 +475,7 @@ Helpers: `extraction/case_ids.py` (`parse_slide_ids`, `CaseSpec`, `load_cases_fr
 ```text
 runs/{baseline_name}/{case_key}/
   cot_chain.json          # copy of selected slide chain; eval key = case_key
-  case_meta.json          # selected slide, rationale, selection method
+  case_meta.json          # selected slide, why its CoT was selected, selection method
   report.txt              # Phase 2 report from the selected chain
   slides/{physical}.svs/
     cot_chain.json        # preserved per-slide Phase 1 chain
@@ -493,7 +493,7 @@ Batch arrays (`scripts/cluster/run_baseline_batch.sh`) index **cases**, not phys
 
 1. For each physical WSI in `parse_slide_ids(case_key)`: run **full graph traversal** (or naive one-shot) → `runs/.../slides/{physical}/cot_chain.json`.
 2. **Pick one chain** (`agent/slide_selector.py`). Policy: malignant > premalignant > benign > non-neoplastic/reactive > descriptive, then specificity, then slide order. The selector must return one existing `slide_id`; invalid output falls back to the graph's final diagnosis category.
-3. Copy the selected chain unchanged to case-level `cot_chain.json`. Store the choice and rationale in `case_meta.json`.
+3. Copy the selected chain unchanged to case-level `cot_chain.json`. Save the selector's reasoning for why this CoT was chosen in both `cot_chain.json` (`selection_rationale`) and `case_meta.json` (`rationale`), together with the selected slide ID and selection method.
 4. Phase 2 writes the report from the selected chain and selected slide embedding only.
 5. Chain metrics (BPV, Edge-F1, node accuracy, MESS) score one real graph path. Report metrics score the selected-chain report. The eval join key remains the full GT `slide_id` string.
 
