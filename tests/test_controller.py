@@ -200,6 +200,10 @@ def test_structured_answer_skips_non_choice_nodes():
     assert [s.node_id for s in steps] == ["choice", "multi", "report"]
     assert backend.json_ids == ["choice"]
     assert backend.answer_ids == ["multi", "report"]
+    assert steps[0].answer_branch == "structured"
+    assert steps[1].answer_branch == "plain"
+    assert steps[1].answer_branch_skip_reason == "not_choice_node"
+    assert steps[2].answer_branch == "plain"
 
 
 def test_invalid_react_answer_retries_on_single_call_path(monkeypatch, tmp_path):
@@ -270,6 +274,8 @@ def test_invalid_react_answer_retries_on_single_call_path(monkeypatch, tmp_path)
     assert react_calls == ["patch"]  # ReAct ran once, not once per attempt
     assert backend.answer_ids == ["patch"]
     assert backend.answer_bundles == [react_bundle]  # fallback reuses ReAct evidence
+    assert steps[0].answer_branch == "plain"
+    assert steps[0].answer_branch_skip_reason == "react_invalid_answer"
 
 
 def test_node_react_falls_back_without_retriever():
@@ -304,3 +310,6 @@ def test_node_react_falls_back_without_retriever():
     assert [s.node_id for s in steps] == ["patch"]
     assert backend.json_ids == []
     assert backend.answer_ids == ["patch"]
+    assert steps[0].answer_branch == "plain"
+    assert "no_retriever" in steps[0].answer_branch_skip_reason
+    assert "no_slide_cache" in steps[0].answer_branch_skip_reason

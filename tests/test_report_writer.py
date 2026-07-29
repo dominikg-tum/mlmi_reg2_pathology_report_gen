@@ -8,7 +8,10 @@ from agent.report_writer import (
 
 
 def test_slide_projector_shape():
-    pytest.importorskip("torch")
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch.nn")
+    if not hasattr(torch, "nn"):
+        pytest.skip("torch.nn unavailable")
     proj = SlideProjector(in_dim=1024, out_dim=4096)
     out = proj.project(np.ones(1024, dtype=np.float32))
     assert out.shape == (4096,)

@@ -27,7 +27,7 @@ def test_run_agent_traversal_passes_resolved_wsi_path(tmp_path, monkeypatch):
     monkeypatch.setattr(
         agent_runner.CaseMemory,
         "from_config",
-        classmethod(lambda cls, name: object()),
+        classmethod(lambda cls, name, **kwargs: object()),
     )
     monkeypatch.setattr(
         agent_runner,
