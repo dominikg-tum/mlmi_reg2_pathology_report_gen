@@ -130,3 +130,74 @@ def test_parse_naive_response():
     assert chain["slide_id"] == "x.svs"
     assert chain["report"] == "Benign endometrium."
     assert len(chain["chain-of-thought"]) == 3
+
+
+def test_run_case_phase1_skips_uncached_patch_slides(tmp_path, monkeypatch):
+    """p0-p3: missing patch_embeddings skip the slide, keep runnable siblings."""
+    case = CaseSpec(
+        case_key="a.svs,b.svs,c.svs",
+        physical_slides=["a.svs", "b.svs", "c.svs"],
+        split="test",
+    )
+    runs_dir = tmp_path / "runs"
+    cache_root = tmp_path / "cache"
+    # Only b.svs has offline CONCH embeddings.
+    emb = cache_root / "b.svs" / "patch_embeddings_20x.pt"
+    emb.parent.mkdir(parents=True)
+    emb.write_bytes(b"fake")
+
+    called: list[str] = []
+
+    def _fake_traversal(**kwargs):
+        sid = kwargs["slide_id"]
+        called.append(sid)
+        chain = {
+            "slide_id": sid,
+            "chain-of-thought": [
+                {
+                    "node_id": "n",
+                    "question": "Q?",
+                    "answer": f"A-{sid}",
+                    "next_question": "",
+                }
+            ],
+            "node_path": ["n"],
+            "report": "",
+        }
+        return AgentRunResult(steps=[], chain=chain, retrieval_log=[])
+
+    monkeypatch.setattr(agent_runner, "run_agent_traversal", _fake_traversal)
+    monkeypatch.setattr(agent_runner, "fixed_retrieval_pool", lambda: "20x")
+
+    out = run_case_phase1(
+        case,
+        runs_dir=runs_dir,
+        backend="dummy",
+        visual="patch_retrieve",
+        cache_root=cache_root,
+    )
+    assert called == ["b.svs"]
+    meta = json.loads((out.parent / "case_meta.json").read_text())
+    assert meta["chosen_slide_id"] == "b.svs"
+    skipped = {row["slide_id"]: row["reason"] for row in meta["skipped_slides"]}
+    assert skipped == {"a.svs": "no_patch_cache", "c.svs": "no_patch_cache"}
+
+
+def test_run_case_phase1_errors_when_all_patch_caches_missing(tmp_path):
+    case = CaseSpec(
+        case_key="a.svs,b.svs",
+        physical_slides=["a.svs", "b.svs"],
+        split="test",
+    )
+    try:
+        run_case_phase1(
+            case,
+            runs_dir=tmp_path / "runs",
+            backend="dummy",
+            visual="patch_retrieve",
+            cache_root=tmp_path / "empty_cache",
+        )
+    except FileNotFoundError as exc:
+        assert "No patch_embeddings cache" in str(exc)
+        return
+    raise AssertionError("expected FileNotFoundError")
