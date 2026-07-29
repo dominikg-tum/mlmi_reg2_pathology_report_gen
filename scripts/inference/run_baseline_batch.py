@@ -146,7 +146,7 @@ def main() -> None:
         required=True,
         help=(
             "a/b1/b2=thumbnail graph; p0-p3=patch; naive=thumbnail one-shot no graph. "
-            "All use SS-LLM multi-WSI (per-slide Phase 1, case-level merged chain)."
+            "All use SS-LLM Pick (per-slide Phase 1, one selected case chain)."
         ),
     )
     parser.add_argument("--chains", type=Path, default=DEFAULT_CHAINS)

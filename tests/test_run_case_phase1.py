@@ -1,4 +1,4 @@
-"""run_case_phase1 with dummy backend writes SS-LLM case layout."""
+"""run_case_phase1 with dummy backend writes SS-LLM Pick case layout."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from baselines.agent_runner import AgentRunResult, run_case_phase1
 from extraction.case_ids import CaseSpec, physical_run_dir
 
 
-def test_run_case_phase1_writes_per_slide_and_merged(tmp_path, monkeypatch):
+def test_run_case_phase1_writes_per_slide_and_selected_case(tmp_path, monkeypatch):
     case = CaseSpec(
         case_key="a.svs,b.svs",
         physical_slides=["a.svs", "b.svs"],
@@ -39,10 +39,17 @@ def test_run_case_phase1_writes_per_slide_and_merged(tmp_path, monkeypatch):
 
     out = run_case_phase1(case, runs_dir=runs_dir, backend="dummy")
     assert out.exists()
-    merged = json.loads(out.read_text())
-    assert merged["slide_id"] == "a.svs,b.svs"
-    assert merged["physical_slides"] == ["a.svs", "b.svs"]
-    assert len(merged["chain-of-thought"]) == 2
+    selected = json.loads(out.read_text())
+    assert selected["slide_id"] == "a.svs,b.svs"
+    assert selected["physical_slides"] == ["a.svs", "b.svs"]
+    assert selected["selected_slide_id"] == "a.svs"
+    assert selected["fusion"] == "ss_llm_pick"
+    assert len(selected["chain-of-thought"]) == 1
+    assert selected["chain-of-thought"][0]["answer"] == "A-a.svs"
+
+    meta = json.loads((out.parent / "case_meta.json").read_text())
+    assert meta["chosen_slide_id"] == "a.svs"
+    assert meta["selection_method"] == "severity_fallback"
 
     for sid in ("a.svs", "b.svs"):
         phys = physical_run_dir(runs_dir, case.case_key, sid) / "cot_chain.json"
@@ -65,6 +72,48 @@ def test_run_case_phase1_writes_per_slide_and_merged(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_runner, "run_agent_traversal", _tracking_traversal)
     run_case_phase1(case, runs_dir=runs_dir, backend="dummy", skip_existing=True)
     assert calls == ["b.svs"]
+
+
+def test_missing_case_meta_is_rebuilt_without_reselection(tmp_path, monkeypatch):
+    case = CaseSpec(
+        case_key="a.svs,b.svs",
+        physical_slides=["a.svs", "b.svs"],
+        split="test",
+    )
+    runs_dir = tmp_path / "runs"
+    for sid in case.physical_slides:
+        phys = physical_run_dir(runs_dir, case.case_key, sid)
+        phys.mkdir(parents=True)
+        (phys / "cot_chain.json").write_text(
+            json.dumps({"slide_id": sid, "chain-of-thought": []}) + "\n"
+        )
+
+    case_dir = runs_dir / case.case_key
+    (case_dir / "cot_chain.json").write_text(
+        json.dumps(
+            {
+                "slide_id": case.case_key,
+                "physical_slides": case.physical_slides,
+                "selected_slide_id": "b.svs",
+                "selection_rationale": "Malignant on the second slide.",
+                "selection_method": "llm",
+                "fusion": "ss_llm_pick",
+                "chain-of-thought": [],
+            }
+        )
+        + "\n"
+    )
+
+    def _fail(**kwargs):
+        raise AssertionError("selection must not re-run when a valid pick is stored")
+
+    monkeypatch.setattr(agent_runner, "select_slide_chain", _fail)
+
+    out = run_case_phase1(case, runs_dir=runs_dir, backend="dummy", skip_existing=True)
+    meta = json.loads((out.parent / "case_meta.json").read_text())
+    assert meta["chosen_slide_id"] == "b.svs"
+    assert meta["selection_method"] == "llm"
+    assert json.loads(out.read_text())["selected_slide_id"] == "b.svs"
 
 
 def test_parse_naive_response():

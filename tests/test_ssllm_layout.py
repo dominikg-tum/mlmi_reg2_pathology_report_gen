@@ -1,11 +1,16 @@
-"""SS-LLM case layout + predictions join key = GT comma slide_id."""
+"""SS-LLM Pick layout + predictions join key = GT comma slide_id."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from agent.report_writer import merge_case_chains, write_merged_case_chain
+from agent.report_writer import write_case_chain
+from agent.slide_selector import (
+    SlideSelection,
+    build_selected_case_chain,
+    selection_metadata,
+)
 from eval.edge_parser import parse_slide_run, record_to_eval_dict
 from eval.run_eval import load_jsonl, select_eval_keys
 from extraction.case_ids import case_run_dir, physical_run_dir
@@ -36,10 +41,30 @@ def test_ssllm_layout_predictions_match_gt_key(tmp_path: Path):
         phys.mkdir(parents=True)
         (phys / "cot_chain.json").write_text(json.dumps(chain) + "\n")
 
-    merged = merge_case_chains(chains, ["a.svs", "b.svs"], case_key)
+    selection = SlideSelection(
+        chosen_slide_id="b.svs",
+        rationale="Second slide contains the main finding.",
+        method="llm",
+    )
+    selected = build_selected_case_chain(
+        chains[1],
+        case_key=case_key,
+        physical_slides=["a.svs", "b.svs"],
+        selection=selection,
+    )
     case_dir = case_run_dir(runs_dir, case_key)
-    write_merged_case_chain(case_dir / "cot_chain.json", merged)
-    (case_dir / "report.txt").write_text("Integrated CAP report.\n")
+    write_case_chain(case_dir / "cot_chain.json", selected)
+    (case_dir / "case_meta.json").write_text(
+        json.dumps(
+            selection_metadata(
+                case_key=case_key,
+                physical_slides=["a.svs", "b.svs"],
+                selection=selection,
+            )
+        )
+        + "\n"
+    )
+    (case_dir / "report.txt").write_text("Selected-slide CAP report.\n")
 
     # Nested slides/ must not appear as top-level case dirs.
     dirs = iter_case_dirs(runs_dir)
@@ -48,7 +73,8 @@ def test_ssllm_layout_predictions_match_gt_key(tmp_path: Path):
     record = parse_slide_run(runs_dir, case_key)
     pred = record_to_eval_dict(record)
     assert pred["slide_id"] == case_key
-    assert "Integrated CAP report" in pred["report"]
+    assert pred["node_path"] == ["n2"]
+    assert "Selected-slide CAP report" in pred["report"]
 
     pred_path = runs_dir / "predictions.jsonl"
     gt_path = runs_dir / "gt.jsonl"

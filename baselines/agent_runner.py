@@ -17,7 +17,13 @@ from agent.backends import (
 )
 from agent.controller import chain_to_dict, traverse
 from agent.memory import CaseMemory
-from agent.report_writer import merge_case_chains, write_merged_case_chain
+from agent.report_writer import write_case_chain
+from agent.slide_selector import (
+    build_selected_case_chain,
+    select_slide_chain,
+    selection_from_case_chain,
+    write_case_meta,
+)
 from agent.types import Step
 from extraction.case_ids import (
     CaseSpec,
@@ -61,6 +67,18 @@ def build_backend(name: str, cfg: dict | None = None) -> AnswerBackend:
         base_model = ft.get("base_model") or cfg["models"]["qwen3_vl_8b"]
         return FineTunedBackend(base_model, ft.get("adapter_dir") or None)
     raise ValueError(f"Unknown backend: {name!r}")
+
+
+def build_selector_backend(backend: str = "qwen") -> AnswerBackend | None:
+    """SS-LLM selector model, shared by all ablations. None → deterministic fallback.
+
+    LoRA adapters are skipped so a second large model is never loaded for selection.
+    """
+    name = "qwen" if backend == "finetuned" else backend
+    try:
+        return build_backend(name)
+    except Exception:
+        return None
 
 
 @dataclass
@@ -207,7 +225,7 @@ def run_case_phase1(
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
 ) -> Path:
-    """SS-LLM Phase 1: full graph per physical WSI, then merge case cot_chain.json."""
+    """SS-LLM Phase 1: full graph per WSI, then pick one case-level chain."""
     if isinstance(case, str):
         case = case_spec_from_key(case)
 
@@ -220,9 +238,21 @@ def run_case_phase1(
             for pid in case.physical_slides
         )
 
-    # Only skip when case merge AND every physical slide chain are present.
+    # Old concatenated case chains must be migrated to SS-LLM Pick.
     if skip_existing and case_chain_path.exists() and _all_physical_chains_exist():
-        return case_chain_path
+        stored = selection_from_case_chain(
+            json.loads(case_chain_path.read_text()), case.physical_slides
+        )
+        if stored is not None:
+            meta_path = case_dir / "case_meta.json"
+            if not meta_path.exists():
+                write_case_meta(
+                    meta_path,
+                    case_key=case.case_key,
+                    physical_slides=case.physical_slides,
+                    selection=stored,
+                )
+            return case_chain_path
 
     chains: list[dict[str, Any]] = []
     for physical_id in case.physical_slides:
@@ -250,6 +280,23 @@ def run_case_phase1(
         write_phase1_outputs_to_dir(result, phys_dir)
         chains.append(result.chain)
 
-    merged = merge_case_chains(chains, case.physical_slides, case.case_key)
-    write_merged_case_chain(case_chain_path, merged)
+    selection = select_slide_chain(
+        chains,
+        case.physical_slides,
+        backend=build_selector_backend(backend),
+    )
+    selected_index = case.physical_slides.index(selection.chosen_slide_id)
+    case_chain = build_selected_case_chain(
+        chains[selected_index],
+        case_key=case.case_key,
+        physical_slides=case.physical_slides,
+        selection=selection,
+    )
+    write_case_chain(case_chain_path, case_chain)
+    write_case_meta(
+        case_dir / "case_meta.json",
+        case_key=case.case_key,
+        physical_slides=case.physical_slides,
+        selection=selection,
+    )
     return case_chain_path

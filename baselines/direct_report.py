@@ -1,4 +1,4 @@
-"""Naive baseline: thumbnail → one-shot CoT (no graph), then SS-LLM case merge."""
+"""Naive baseline: thumbnail → one-shot CoT (no graph), then SS-LLM Pick."""
 
 from __future__ import annotations
 
@@ -7,8 +7,19 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agent.report_writer import merge_case_chains, write_merged_case_chain
-from baselines.agent_runner import build_backend, load_paths_config, load_vision_cache_root
+from agent.report_writer import write_case_chain
+from agent.slide_selector import (
+    build_selected_case_chain,
+    select_slide_chain,
+    selection_from_case_chain,
+    write_case_meta,
+)
+from baselines.agent_runner import (
+    build_backend,
+    build_selector_backend,
+    load_paths_config,
+    load_vision_cache_root,
+)
 from extraction.case_ids import (
     CaseSpec,
     case_run_dir,
@@ -192,7 +203,7 @@ def run_naive_case(
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
 ) -> Path:
-    """SS-LLM naive: one-shot per physical slide, then case-level merged chain."""
+    """SS-LLM naive: one-shot per physical slide, then pick one case chain."""
     if isinstance(case, str):
         case = case_spec_from_key(case)
 
@@ -206,7 +217,19 @@ def run_naive_case(
         )
 
     if skip_existing and case_chain_path.exists() and _all_physical_chains_exist():
-        return case_chain_path
+        stored = selection_from_case_chain(
+            json.loads(case_chain_path.read_text()), case.physical_slides
+        )
+        if stored is not None:
+            meta_path = case_dir / "case_meta.json"
+            if not meta_path.exists():
+                write_case_meta(
+                    meta_path,
+                    case_key=case.case_key,
+                    physical_slides=case.physical_slides,
+                    selection=stored,
+                )
+            return case_chain_path
 
     chains: list[dict[str, Any]] = []
     for physical_id in case.physical_slides:
@@ -229,8 +252,25 @@ def run_naive_case(
             (phys_dir / "report.txt").write_text(report + "\n")
         chains.append(chain)
 
-    merged = merge_case_chains(chains, case.physical_slides, case.case_key)
-    write_merged_case_chain(case_chain_path, merged)
+    selection = select_slide_chain(
+        chains,
+        case.physical_slides,
+        backend=build_selector_backend(backend),
+    )
+    selected_index = case.physical_slides.index(selection.chosen_slide_id)
+    case_chain = build_selected_case_chain(
+        chains[selected_index],
+        case_key=case.case_key,
+        physical_slides=case.physical_slides,
+        selection=selection,
+    )
+    write_case_chain(case_chain_path, case_chain)
+    write_case_meta(
+        case_dir / "case_meta.json",
+        case_key=case.case_key,
+        physical_slides=case.physical_slides,
+        selection=selection,
+    )
     return case_chain_path
 
 

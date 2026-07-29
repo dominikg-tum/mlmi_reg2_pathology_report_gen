@@ -74,7 +74,7 @@ Build a system that, **given only a WSI at test time**, walks a **diagnostic gra
 | Report | Supervision (WP3 chains) + HippoRAG 2 index (train split only) | **Not available** |
 
 
-**WSI data:** `.svs` files under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` (~220 **cases**, ~460 **slides**, ~2 slides/case on average). Labels xlsx `slide_ids` is comma-separated per case (e.g. cervix + corpus + polyp blocks). Canonical path in `[configs/paths.yaml](../configs/paths.yaml)` → `cluster.data_dir`. **Inference uses SS-LLM multi-WSI** (full graph per physical slide, case-level merge) — see [§2f](#2f-multiple-wsis-per-case).
+**WSI data:** `.svs` files under `/mnt/projects/mlmi/TUMUntera/TUM_Untera_data` (~220 **cases**, ~460 **slides**, ~2 slides/case on average). Labels xlsx `slide_ids` is comma-separated per case (e.g. cervix + corpus + polyp blocks). Canonical path in `[configs/paths.yaml](../configs/paths.yaml)` → `cluster.data_dir`. **Inference uses SS-LLM Pick** (full graph per physical slide, one selected case chain) — see [§2f](#2f-multiple-wsis-per-case).
 
 **Cluster-only assets** (not on local laptops — see [cluster_setup.md](cluster_setup.md)):
 
@@ -456,7 +456,7 @@ Your colleague is right about the **ontology alignment**: KEEP embeddings are tr
 
 One **case** in the labels spreadsheet maps to **one integrated pathology report**, but often **several** `.svs` **files** (separate tissue parts or paraffin blocks: cervix curettage, corpus curettage, polyp block, etc.). Agent papers we borrow from (SlideSeek, PathAgent, PathNavigate, MMNavAgent) all reason on **one gigapixel slide per run**; SlideSeek explicitly lists multi-slide fusion as **future work**.
 
-**Implemented (v1): SS-LLM.** Inference unit is the **case** (GT `slide_id` string from `chains.jsonl`, often comma-separated). Every ablation (`a`/`b1`/`b2`/`p0`–`p3`/`naive`) loops physical WSIs, then merges.
+**Implemented (v1): SS-LLM Pick.** Inference unit is the **case** (GT `slide_id` string from `chains.jsonl`, often comma-separated). Every ablation (`a`/`b1`/`b2`/`p0`–`p3`/`naive`) runs each physical WSI independently. An LLM then selects one clinically significant chain. Chains are never concatenated.
 
 
 |             | Training                                  | Inference (current)                                              |
@@ -474,32 +474,37 @@ Helpers: `extraction/case_ids.py` (`parse_slide_ids`, `CaseSpec`, `load_cases_fr
 
 ```text
 runs/{baseline_name}/{case_key}/
-  cot_chain.json          # merged case chain (eval key = case_key)
-  report.txt              # Phase 2 CAP report (after run_phase2)
+  cot_chain.json          # copy of selected slide chain; eval key = case_key
+  case_meta.json          # selected slide, rationale, selection method
+  report.txt              # Phase 2 report from the selected chain
   slides/{physical}.svs/
-    cot_chain.json        # per-slide Phase 1
+    cot_chain.json        # preserved per-slide Phase 1 chain
 ```
 
 Batch arrays (`scripts/cluster/run_baseline_batch.sh`) index **cases**, not physical slides. `--slide-id` / `SLIDE_ID` means the GT case key.
 
 ### Two fusion approaches
 
-#### A. SS-LLM-style — per-slide chain → text merge (IMPLEMENTED)
+#### A. SS-LLM Pick — per-slide chains → select one chain (IMPLEMENTED)
 
 **Lineage:** PolyPath baselines **SS-Random** / **SS-LLM** ([arXiv:2502.10536](https://arxiv.org/abs/2502.10536)); fits our existing Phase 1 → Phase 2 split.
 
 **Flow (wired):**
 
 1. For each physical WSI in `parse_slide_ids(case_key)`: run **full graph traversal** (or naive one-shot) → `runs/.../slides/{physical}/cot_chain.json`.
-2. **Synthesize merge** in Phase 2 (`agent/report_writer.py`): MedGemma writes one case report from all chains labeled by `slide_id`. Mean TITAN embedding across slides for the projector prefix.
-3. Case-level `cot_chain.json` concatenates steps with `[slide_id]` prefixes for REG² edge parsing. Eval join key = full GT `slide_id` string.
+2. **Pick one chain** (`agent/slide_selector.py`). Policy: malignant > premalignant > benign > non-neoplastic/reactive > descriptive, then specificity, then slide order. The selector must return one existing `slide_id`; invalid output falls back to the graph's final diagnosis category.
+3. Copy the selected chain unchanged to case-level `cot_chain.json`. Store the choice and rationale in `case_meta.json`.
+4. Phase 2 writes the report from the selected chain and selected slide embedding only.
+5. Chain metrics (BPV, Edge-F1, node accuracy, MESS) score one real graph path. Report metrics score the selected-chain report. The eval join key remains the full GT `slide_id` string.
+
+**Selection is decided once.** Phase 1 picks with the shared selector model (`qwen`, also for the LoRA ablation, so no second large model is loaded). A resumed run reuses the stored pick and only rebuilds `case_meta.json` if it went missing. Legacy runs written before this layout are re-picked in Phase 2 with the same selector (`--selector-backend`, default `qwen`); if that model is unreachable, selection degrades to the deterministic severity policy and `selection_method` in `case_meta.json` records which path was taken.
 
 
 | Pros                                                          | Cons                                                                                     |
 | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Reuses offline cache + graph as-is; 2–3× Phase 1 only         | Merge can drop cross-slide visual conflicts                                              |
+| Reuses offline cache + graph as-is; 2–3× Phase 1 only         | Picking one slide can omit complementary findings                                        |
 | No long-context VLM; works with **MedGemma chain-only** today | Per-slide graph may mis-route on wrong tissue (cervix slide answering endometrium nodes) |
-| Deterministic chains per slide → auditable                    | SS-LLM merge is text-only; no re-grounding in pixels                                     |
+| One real graph path keeps REG² CoT metrics interpretable      | Selector sees chain text, not pixels                                                      |
 | Native for all batch ablations                                |                                                                                          |
 
 #### B. PolyPath-style — long-context patch fusion (report-centric, vision-heavy)
@@ -530,8 +535,8 @@ Batch arrays (`scripts/cluster/run_baseline_batch.sh`) index **cases**, not phys
 | ------------------------------------- | ------------------------------------ | ------------------------------------------------------ |
 | **Primary signal**                    | Text chains from graph               | Pixels (many patches)                                  |
 | **Phase 1 graph**                     | Once per slide                       | Optional per slide, or skip graph for report-only path |
-| **Phase 2**                           | Merge / synthesize text              | Long-context image + text generation                   |
-| **REG² chain metrics**                | Per-slide chains + case-level report | Harder — may need case-level eval only                 |
+| **Phase 2**                           | Report from selected chain           | Long-context image + text generation                   |
+| **REG² chain metrics**                | Selected slide's unchanged path      | Harder — may need case-level eval only                 |
 | **Compute**                           | O(n_slides) × Phase 1                | O(1) heavy Phase 2; huge patch encode                  |
 | **Cluster fit (A100, staged models)** | ✅ **First target**                   | ⚠️ Later — context / patch budget engineering          |
 

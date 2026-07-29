@@ -8,7 +8,7 @@
 #SBATCH --error=/mnt/projects/mlmi/reg2/nick/logs/baseline_batch_%x_%A_%a.err
 #
 # Thumbnail / patch baseline batch over test split (one CASE per array task).
-# Each case runs SS-LLM: full Phase 1 for every physical WSI, then merged case chain.
+# Each case runs SS-LLM Pick: Phase 1 per WSI, then one selected case chain.
 #
 # Prerequisite: vLLM Qwen server running (sbatch scripts/cluster/start_qwen_server.sh)
 # and configs/paths.yaml qwen.api_base_url reachable from compute nodes.
