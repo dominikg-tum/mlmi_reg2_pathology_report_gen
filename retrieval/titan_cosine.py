@@ -157,7 +157,7 @@ class TitanCosineRetriever:
         k: int | None = None,
         exclude: set[int] | None = None,
         anchor_coord_lv0: tuple[int, int] | None = None,
-        min_dist_lv0_px: int = 0,
+        min_dist_pool_px: int = 0,
         wsi_path: Path | None = None,
         return_images: bool = True,
         tier: str | None = None,
@@ -187,21 +187,26 @@ class TitanCosineRetriever:
             raise RuntimeError(f"patch_size_lv0 missing in meta_{level}.json")
 
         # Optional strict min-distance filter (paired_regions fallback).
-        # Evaluate in level-0 pixel space using patch centres.
-        if anchor_coord_lv0 is not None and min_dist_lv0_px > 0:
+        # min_dist_pool_px is configured in pool-magnification pixels
+        # (retrieval.paired_regions.min_dist_20x_px), while coords are level-0.
+        # On a 40x-scanned slide one 20x pixel is two level-0 pixels.
+        if anchor_coord_lv0 is not None and min_dist_pool_px > 0:
+            _, native_px = mag_band_config(level)
+            lv0_per_pool_px = (ps_lv0 / float(native_px)) if native_px > 0 else 1.0
+            min_dist_lv0 = float(min_dist_pool_px) * lv0_per_pool_px
             ax = float(anchor_coord_lv0[0] + ps_lv0 / 2.0)
             ay = float(anchor_coord_lv0[1] + ps_lv0 / 2.0)
             centres = pool_coords.astype(np.float64) + (ps_lv0 / 2.0)
             dists = np.sqrt((centres[:, 0] - ax) ** 2 + (centres[:, 1] - ay) ** 2)
-            sims[dists < float(min_dist_lv0_px)] = -np.inf
+            sims[dists < min_dist_lv0] = -np.inf
             if not np.isfinite(sims).any():
                 # Relax once.
-                relax = max(int(min_dist_lv0_px // 2), 0)
+                relax = min_dist_lv0 / 2.0
                 sims = _cosine(q, pool_emb)
                 if exclude:
                     sims[np.isin(pool_indices, list(exclude))] = -np.inf
                 if relax > 0:
-                    sims[dists < float(relax)] = -np.inf
+                    sims[dists < relax] = -np.inf
 
         order = np.argsort(-sims)
         order = order[sims[order] != -np.inf]

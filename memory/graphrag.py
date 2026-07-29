@@ -12,5 +12,12 @@ class GraphRAGMemory:
             "NICK: GraphRAG index over train reports — compare vs hipporag2 in ablations."
         )
 
-    def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
+    def retrieve(
+        self,
+        node: Node,
+        query: str,
+        *,
+        k: int = 5,
+        exclude_case_key: str | None = None,
+    ) -> str:
         raise NotImplementedError("NICK: GraphRAG local/global search for node context.")

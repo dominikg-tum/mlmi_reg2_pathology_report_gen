@@ -35,6 +35,12 @@ def main() -> None:
         help="Return Step A JSON only (no ReAct loop)",
     )
     parser.add_argument("--paired-regions", action="store_true")
+    parser.add_argument(
+        "--react-max-iters",
+        type=int,
+        default=None,
+        help="ReAct iterations per node (default: node_react.max_iters in configs/vision.yaml)",
+    )
     parser.add_argument("--runs-dir", type=Path, default=None)
     parser.add_argument("--skip-existing", action="store_true")
     pool = parser.add_mutually_exclusive_group()
@@ -70,6 +76,7 @@ def main() -> None:
         node_react=args.node_react,
         structured_answer=args.structured_answer,
         paired_regions=args.paired_regions,
+        react_max_iters=args.react_max_iters,
         skip_existing=args.skip_existing,
         search_all_patches=resolve_search_all_patches(
             kmeans_pool=args.kmeans_pool,

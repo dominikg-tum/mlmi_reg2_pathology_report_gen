@@ -75,6 +75,11 @@ tissue_filter:
   # Legacy fallback (method: mean_threshold)
   background_threshold: 220
 
+# Bounded per-node ReAct (--node-react, baselines p2/p3). Each iteration costs
+# 2-3 VLM calls, so this caps worst-case Phase 1 runtime per graph node.
+node_react:
+  max_iters: 3
+
 defaults:
   visual: thumbnail
   retriever: none

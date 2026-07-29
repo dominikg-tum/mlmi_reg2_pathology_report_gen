@@ -68,6 +68,12 @@ extraction:
   report_parts_json: /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen/data/report_parts_extracted.json
 
 rag:
+  # Legacy / fallback Chroma path (prefer variant-specific dirs below).
   chroma_db_storage: /mnt/projects/mlmi/reg2/chroma_db_storage
+  # Dual HybridRAG ablation stores (build once, switch via --memory / baseline flag).
+  chroma_db_storage_nocap: /mnt/projects/mlmi/reg2/chroma_db_storage_nocap
+  chroma_db_storage_cap: /mnt/projects/mlmi/reg2/chroma_db_storage_cap
   # Repo-relative when resolved in memory/hybridrag.py (works on laptop + cluster)
   reference_dir: data/memory/reference
+  hybridrag_manifest_nocap: data/memory/hybridrag_manifest_nocap.json
+  hybridrag_manifest_cap: data/memory/hybridrag_manifest_cap.json

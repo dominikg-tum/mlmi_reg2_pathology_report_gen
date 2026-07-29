@@ -15,6 +15,7 @@ from extraction.graph_walk import (
 )
 from extraction.labels_io import assign_splits, load_existing_slide_ids, write_chains_jsonl
 from graph import GRAPH, load_graph
+from graph.schema import InteractionType, Node, NodeKind, Tier
 
 
 def _node(node_id: str):
@@ -29,7 +30,16 @@ def test_normalize_answer_exact_and_case():
 
 
 def test_normalize_answer_single_option():
-    node = _node("integration_synopsis")
+    node = Node(
+        id="single_option_stub",
+        label="Stub",
+        question="Proceed?",
+        tier=Tier.INTEGRATION,
+        node_kind=NodeKind.INTEGRATION,
+        interaction=InteractionType.SINGLE_SELECT,
+        options=["proceed_to_report"],
+        edges={"proceed_to_report": "report"},
+    )
     assert normalize_answer("anything", node) == "proceed_to_report"
 
 
@@ -39,7 +49,7 @@ def test_normalize_answer_invalid():
 
 
 def test_build_step_prompt_includes_prior_steps():
-    node = _node("endometrium_adequacy")
+    node = _node("endometrium_assessment")
     prior = [
         Step("organ_procedure", "Organ?", "uterus_hysterectomy", 1.0),
         Step("compartment", "Compartment?", "endometrium", 1.0),
@@ -47,7 +57,7 @@ def test_build_step_prompt_includes_prior_steps():
     prompt = build_step_prompt(node, prior, "Sample report text.")
     assert "Organ? -> uterus_hysterectomy" in prompt
     assert "Sample report text." in prompt
-    assert "endometrium_adequacy" not in prompt or node.question in prompt
+    assert node.question in prompt
 
 
 def test_steps_to_chain_dict_schema():
@@ -98,17 +108,19 @@ class _FakeClient:
 
 
 def test_walk_graph_endometrium_prefix():
-    """Mock answers along organ -> compartment -> adequate path."""
+    """Mock answers along organ -> compartment -> carcinoma path."""
     graph, root_id = load_graph()
     answers = [
         "uterus_hysterectomy",
         "endometrium",
-        "adequate",
-        "malignant_pattern",
+        "carcinoma",
         "endometrioid",
         "grade_2",
-        "present_deep",
-        "proceed_to_report",
+        "atrophic_background",
+        "deep_invasion",
+        "definitive",
+        "malignant",
+        "Final report text.",
     ]
     client = _FakeClient(answers)
     result = walk_graph("Endometrioid carcinoma grade 2.", graph, root_id, client, "mock")
@@ -116,7 +128,8 @@ def test_walk_graph_endometrium_prefix():
     assert result.node_path[1] == "compartment"
     assert result.steps[1].answer == "endometrium"
     assert "report" not in result.node_path
-    assert result.node_path[-1] == "integration_synopsis"
+    assert "endometrium_assessment" in result.node_path
+    assert result.node_path[-1] == "diagnosis"
 
 
 def test_extract_node_answer_retries_on_invalid():

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,14 +34,21 @@ from extraction.case_ids import (
     physical_run_dir,
 )
 from vision.cache import SlideCache, build_slide_cache
+from vision.mag_config import fixed_retrieval_pool
 from vision.thumbnail import _resolve_wsi_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+logger = logging.getLogger(__name__)
 
 
 def load_paths_config() -> dict:
     with (REPO_ROOT / "configs" / "paths.yaml").open() as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    # Cross-node vLLM: set by start_qwen_server.sh / run_baseline_batch.sh
+    override = (os.environ.get("QWEN_API_BASE_URL") or "").strip()
+    if override:
+        cfg.setdefault("qwen", {})["api_base_url"] = override
+    return cfg
 
 
 def load_vision_cache_root() -> Path | None:
@@ -50,6 +59,32 @@ def load_vision_cache_root() -> Path | None:
         vcfg = yaml.safe_load(f)
     cr = vcfg.get("cache_root", "")
     return Path(cr).expanduser() if cr else None
+
+
+def resolve_adapter_dir(cfg: dict | None = None) -> str | None:
+    """LoRA adapter path: env override beats paths.yaml finetuned.adapter_dir."""
+    cfg = cfg or load_paths_config()
+    for key in ("MLMI_ADAPTER_DIR", "LORA_ADAPTER_DIR"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return raw
+    ft = cfg.get("finetuned", {}) or {}
+    raw = str(ft.get("adapter_dir") or "").strip()
+    return raw or None
+
+
+def patch_embeddings_exist(
+    cache_root: Path | None,
+    slide_id: str,
+    *,
+    level: str | None = None,
+) -> bool:
+    """True when offline CONCH embeddings for the retrieval pool are on disk."""
+    if cache_root is None or not slide_id:
+        return False
+    slide_cache = build_slide_cache(cache_root, slide_id)
+    path = slide_cache.embedding_path_for_level(level or fixed_retrieval_pool())
+    return path is not None and path.exists()
 
 
 def build_backend(name: str, cfg: dict | None = None) -> AnswerBackend:
@@ -65,7 +100,20 @@ def build_backend(name: str, cfg: dict | None = None) -> AnswerBackend:
     if name == "finetuned":
         ft = cfg.get("finetuned", {})
         base_model = ft.get("base_model") or cfg["models"]["qwen3_vl_8b"]
-        return FineTunedBackend(base_model, ft.get("adapter_dir") or None)
+        adapter_dir = resolve_adapter_dir(cfg)
+        if not adapter_dir:
+            raise ValueError(
+                "finetuned backend requires an adapter. Set MLMI_ADAPTER_DIR / "
+                "LORA_ADAPTER_DIR or finetuned.adapter_dir in configs/paths.yaml."
+            )
+        adapter_path = Path(adapter_dir)
+        if not adapter_path.exists():
+            raise FileNotFoundError(
+                f"LoRA adapter not found at {adapter_path}. "
+                "Train with scripts/cluster/train_lora.sh or override "
+                "MLMI_ADAPTER_DIR / LORA_ADAPTER_DIR."
+            )
+        return FineTunedBackend(base_model, str(adapter_path))
     raise ValueError(f"Unknown backend: {name!r}")
 
 
@@ -77,7 +125,12 @@ def build_selector_backend(backend: str = "qwen") -> AnswerBackend | None:
     name = "qwen" if backend == "finetuned" else backend
     try:
         return build_backend(name)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "SS-LLM selector backend %r unavailable (%s); using deterministic fallback",
+            name,
+            exc,
+        )
         return None
 
 
@@ -109,6 +162,7 @@ def run_agent_traversal(
     retriever: str = "none",
     navigator: str = "graph_guided",
     slide_id: str = "",
+    case_key: str = "",
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
     skip_report_nodes: bool = False,
@@ -116,13 +170,15 @@ def run_agent_traversal(
     node_react: bool = False,
     structured_answer: bool = False,
     paired_regions: bool = False,
+    react_max_iters: int | None = None,
 ) -> AgentRunResult:
     cfg = load_paths_config()
     wsi_data_dir = wsi_data_dir or Path(cfg["cluster"]["data_dir"])
     cache_root = cache_root or load_vision_cache_root()
 
     answer_backend = build_backend(backend, cfg)
-    mem = CaseMemory.from_config(memory)
+    exclude_key = (case_key or slide_id or "").strip() or None
+    mem = CaseMemory.from_config(memory, exclude_case_key=exclude_key)
     slide_cache: SlideCache | None = (
         build_slide_cache(cache_root, slide_id) if slide_id and cache_root else None
     )
@@ -149,6 +205,7 @@ def run_agent_traversal(
         node_react=node_react,
         structured_answer=structured_answer,
         paired_regions=paired_regions,
+        react_max_iters=react_max_iters,
     )
     chain = chain_to_dict(
         steps,
@@ -221,6 +278,7 @@ def run_case_phase1(
     node_react: bool = False,
     structured_answer: bool = False,
     paired_regions: bool = False,
+    react_max_iters: int | None = None,
     skip_existing: bool = False,
     cache_root: Path | None = None,
     wsi_data_dir: Path | None = None,
@@ -231,17 +289,40 @@ def run_case_phase1(
 
     case_dir = case_run_dir(runs_dir, case.case_key)
     case_chain_path = case_dir / "cot_chain.json"
+    cache_root = cache_root or load_vision_cache_root()
 
-    def _all_physical_chains_exist() -> bool:
+    skipped_slides: list[dict[str, Any]] = []
+    runnable_slides = list(case.physical_slides)
+    if visual == "patch_retrieve":
+        runnable_slides = []
+        for physical_id in case.physical_slides:
+            if patch_embeddings_exist(cache_root, physical_id):
+                runnable_slides.append(physical_id)
+            else:
+                skipped_slides.append(
+                    {
+                        "slide_id": physical_id,
+                        "skipped": True,
+                        "reason": "no_patch_cache",
+                    }
+                )
+        if not runnable_slides:
+            missing = ", ".join(case.physical_slides)
+            raise FileNotFoundError(
+                f"No patch_embeddings cache for any slide in case {case.case_key!r} "
+                f"({missing}). Run offline encode or skip this case."
+            )
+
+    def _all_runnable_chains_exist() -> bool:
         return all(
             (physical_run_dir(runs_dir, case.case_key, pid) / "cot_chain.json").exists()
-            for pid in case.physical_slides
+            for pid in runnable_slides
         )
 
     # Old concatenated case chains must be migrated to SS-LLM Pick.
-    if skip_existing and case_chain_path.exists() and _all_physical_chains_exist():
+    if skip_existing and case_chain_path.exists() and _all_runnable_chains_exist():
         stored = selection_from_case_chain(
-            json.loads(case_chain_path.read_text()), case.physical_slides
+            json.loads(case_chain_path.read_text()), runnable_slides
         )
         if stored is not None:
             meta_path = case_dir / "case_meta.json"
@@ -251,15 +332,18 @@ def run_case_phase1(
                     case_key=case.case_key,
                     physical_slides=case.physical_slides,
                     selection=stored,
+                    skipped_slides=skipped_slides,
                 )
             return case_chain_path
 
     chains: list[dict[str, Any]] = []
-    for physical_id in case.physical_slides:
+    chain_slide_ids: list[str] = []
+    for physical_id in runnable_slides:
         phys_dir = physical_run_dir(runs_dir, case.case_key, physical_id)
         phys_chain = phys_dir / "cot_chain.json"
         if skip_existing and phys_chain.exists():
             chains.append(json.loads(phys_chain.read_text()))
+            chain_slide_ids.append(physical_id)
             continue
 
         result = run_agent_traversal(
@@ -269,6 +353,7 @@ def run_case_phase1(
             retriever=retriever,
             navigator=navigator,
             slide_id=physical_id,
+            case_key=case.case_key,
             cache_root=cache_root,
             wsi_data_dir=wsi_data_dir,
             skip_report_nodes=skip_report_nodes,
@@ -276,16 +361,18 @@ def run_case_phase1(
             node_react=node_react,
             structured_answer=structured_answer,
             paired_regions=paired_regions,
+            react_max_iters=react_max_iters,
         )
         write_phase1_outputs_to_dir(result, phys_dir)
         chains.append(result.chain)
+        chain_slide_ids.append(physical_id)
 
     selection = select_slide_chain(
         chains,
-        case.physical_slides,
+        chain_slide_ids,
         backend=build_selector_backend(backend),
     )
-    selected_index = case.physical_slides.index(selection.chosen_slide_id)
+    selected_index = chain_slide_ids.index(selection.chosen_slide_id)
     case_chain = build_selected_case_chain(
         chains[selected_index],
         case_key=case.case_key,
@@ -298,5 +385,6 @@ def run_case_phase1(
         case_key=case.case_key,
         physical_slides=case.physical_slides,
         selection=selection,
+        skipped_slides=skipped_slides,
     )
     return case_chain_path

@@ -184,8 +184,9 @@ def selection_metadata(
     case_key: str,
     physical_slides: list[str],
     selection: SlideSelection,
+    skipped_slides: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    meta: dict[str, Any] = {
         "case_key": case_key,
         "physical_slides": list(physical_slides),
         "chosen_slide_id": selection.chosen_slide_id,
@@ -193,6 +194,9 @@ def selection_metadata(
         "selection_method": selection.method,
         "fusion": "ss_llm_pick",
     }
+    if skipped_slides:
+        meta["skipped_slides"] = list(skipped_slides)
+    return meta
 
 
 def write_case_meta(
@@ -201,11 +205,13 @@ def write_case_meta(
     case_key: str,
     physical_slides: list[str],
     selection: SlideSelection,
+    skipped_slides: list[dict[str, Any]] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     meta = selection_metadata(
         case_key=case_key,
         physical_slides=physical_slides,
         selection=selection,
+        skipped_slides=skipped_slides,
     )
     path.write_text(json.dumps(meta, indent=2) + "\n")

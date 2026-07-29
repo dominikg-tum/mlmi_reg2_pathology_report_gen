@@ -29,7 +29,7 @@ class GraphGuidedRetriever:
         tier: str | None = None,
         node_kind: str | None = None,
         anchor_coord_lv0: tuple[int, int] | None = None,
-        min_dist_lv0_px: int = 0,
+        min_dist_pool_px: int = 0,
         **kwargs,
     ) -> list[RetrievedPatch]:
         level = fixed_retrieval_pool() if level is None else level
@@ -46,6 +46,6 @@ class GraphGuidedRetriever:
             tier=tier,
             node_kind=node_kind,
             anchor_coord_lv0=anchor_coord_lv0,
-            min_dist_lv0_px=min_dist_lv0_px,
+            min_dist_pool_px=min_dist_pool_px,
             **kwargs,
         )

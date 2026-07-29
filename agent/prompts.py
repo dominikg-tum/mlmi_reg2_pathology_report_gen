@@ -46,7 +46,12 @@ def _prior_steps_text(prior_steps: list[tuple[str, str]] | None) -> str:
     return "\n".join(f"{nid} -> {ans}" for nid, ans in prior_steps)
 
 
-def format_step_a_user(*, node: Node, prior_steps: list[tuple[str, str]] | None = None) -> str:
+def format_step_a_user(
+    *,
+    node: Node,
+    prior_steps: list[tuple[str, str]] | None = None,
+    extra_context: str = "",
+) -> str:
     allowed = "\n".join(f"- {k}" for k in node.options) if node.options else ""
     prior = _prior_steps_text(prior_steps)
     parts = [
@@ -59,6 +64,8 @@ def format_step_a_user(*, node: Node, prior_steps: list[tuple[str, str]] | None 
         parts.append(f"Allowed answer keys:\n{allowed}")
     if prior:
         parts.append(f"Prior diagnostic answers:\n{prior}")
+    if extra_context.strip():
+        parts.append(f"Retrieved knowledge:\n{extra_context.strip()}")
     return "\n\n".join(parts)
 
 

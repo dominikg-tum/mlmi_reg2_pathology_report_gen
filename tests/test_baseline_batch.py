@@ -41,6 +41,8 @@ def test_baseline_specs():
     assert BASELINES["a"].memory == "flat"
     assert BASELINES["b1"].memory == "hipporag2"
     assert BASELINES["b2"].memory == "hybridrag"
+    assert BASELINES["b2_cap"].memory == "hybridrag_cap"
+    assert BASELINES["b2_cap"].name == "baseline_b2_hybridrag_cap"
     assert BASELINES["naive"].mode == "naive"
     assert BASELINES["a"].mode == "graph"
 

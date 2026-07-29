@@ -53,6 +53,7 @@ git push -u origin nick/hipporag2-stub
 
 # --- on the cluster (before running a job) ---
 ssh youruser@head
+ssh dominikgarstenauer@head.garching.camp.cluster
 cd /mnt/projects/mlmi/reg2/repos/mlmi_reg2_pathology_report_gen
 git status          # must be clean — no uncommitted changes!
 git checkout main
@@ -242,6 +243,11 @@ python -m baselines.run_agent --backend qwen --memory flat --visual thumbnail --
 # Batch baselines (test split; needs chains.jsonl + Qwen vLLM)
 python -m scripts.inference.run_baseline_batch --baseline a --split test --dry-run
 BASELINE=a sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
+# HybridRAG ablation: build both stores once, then b2 vs b2_cap
+VARIANT=both FORCE_REBUILD=1 sbatch --export=NONE,VARIANT,FORCE_REBUILD \
+  --job-name=path-hybridrag-both scripts/cluster/build_hybridrag_index.sh
+BASELINE=b2 sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
+BASELINE=b2_cap sbatch --array=0-69 scripts/cluster/run_baseline_batch.sh
 python -m scripts.inference.run_eval_baselines --baseline all --split test
 
 # Eval

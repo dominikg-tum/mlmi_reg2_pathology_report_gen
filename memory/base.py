@@ -6,11 +6,27 @@ from typing import Protocol
 
 from graph.schema import Node
 
+# HybridRAG dual-index ablation:
+#   hybridrag / hybridrag_nocap → train reports only
+#   hybridrag_cap               → train reports + CAP/reference chunks
+_HYBRIDRAG_METHODS = {
+    "hybridrag": "nocap",
+    "hybridrag_nocap": "nocap",
+    "hybridrag_cap": "cap",
+}
+
 
 class SemanticMemory(Protocol):
     def build_index(self, train_reports_path: str, *, split: str = "train") -> None: ...
 
-    def retrieve(self, node: Node, query: str, *, k: int = 5) -> str: ...
+    def retrieve(
+        self,
+        node: Node,
+        query: str,
+        *,
+        k: int = 5,
+        exclude_case_key: str | None = None,
+    ) -> str: ...
 
 
 def get_semantic_memory(method: str) -> SemanticMemory | None:
@@ -28,10 +44,10 @@ def get_semantic_memory(method: str) -> SemanticMemory | None:
         from memory.graphrag import GraphRAGMemory
 
         return GraphRAGMemory()
-    if method == "hybridrag":
+    if method in _HYBRIDRAG_METHODS:
         from memory.hybridrag import HybridRAGMemory
 
-        memory = HybridRAGMemory()
+        memory = HybridRAGMemory(variant=_HYBRIDRAG_METHODS[method])
         memory.ensure_loaded()
         return memory
     raise ValueError(f"Unknown memory method: {method!r}")

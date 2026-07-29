@@ -2,20 +2,20 @@
 # Start submit_baseline_batch.sh detached on the cluster head (survives SSH/VPN disconnect).
 #
 # Run once while on VPN:
-#   ssh nickschwan@head.garching.camp.cluster
-#   cd /mnt/projects/mlmi/reg2/nick/repos/mlmi_reg2_pathology_report_gen
-#   bash scripts/cluster/start_baseline_batch_daemon.sh --baseline b2
+#   ssh dominikgarstenauer@head.garching.camp.cluster
+#   cd /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
+#   bash scripts/cluster/start_baseline_batch_daemon.sh --baseline a
 #
 # Monitor:
-#   tail -f /mnt/projects/mlmi/reg2/nick/logs/baseline_batch_submitter.log
-#   squeue -u nickschwan -n pathology-baseline-batch
-
+#   tail -f /mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/baseline_batch_submitter.log
+#   squeue -u dominikgarstenauer -n path-baseline-a-test
+#   # job name is path-baseline-${BASELINE}-${SPLIT}
 set -euo pipefail
 
-PINNED="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/reg2/nick/repos/mlmi_reg2_pathology_report_gen}"
-LOG_DIR="/mnt/projects/mlmi/reg2/nick/logs"
+PINNED="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen}"
+LOG_DIR="/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs"
 LOG="${LOG_DIR}/baseline_batch_submitter.log"
-LOCK="/mnt/projects/mlmi/reg2/nick/locks/baseline_batch_head.lock"
+LOCK="/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/locks/baseline_batch_head.lock"
 
 mkdir -p "${LOG_DIR}" "$(dirname "${LOCK}")"
 

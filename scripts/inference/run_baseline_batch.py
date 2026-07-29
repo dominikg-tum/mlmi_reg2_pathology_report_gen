@@ -34,6 +34,12 @@ BASELINES: dict[str, BaselineSpec] = {
     "b2": BaselineSpec(
         "baseline_b2_hybridrag", memory="hybridrag", visual="thumbnail", retriever="none"
     ),
+    "b2_cap": BaselineSpec(
+        "baseline_b2_hybridrag_cap",
+        memory="hybridrag_cap",
+        visual="thumbnail",
+        retriever="none",
+    ),
     "p0": BaselineSpec(
         "baseline_p0_patch_cosine", memory="flat", visual="patch_retrieve", retriever="graph_guided"
     ),
@@ -145,7 +151,8 @@ def main() -> None:
         choices=sorted(BASELINES),
         required=True,
         help=(
-            "a/b1/b2=thumbnail graph; p0-p3=patch; naive=thumbnail one-shot no graph. "
+            "a/b1/b2/b2_cap=thumbnail graph; p0-p3=patch; naive=thumbnail one-shot no graph. "
+            "b2=HybridRAG reports-only; b2_cap=HybridRAG+CAP refs. "
             "All use SS-LLM Pick (per-slide Phase 1, one selected case chain)."
         ),
     )

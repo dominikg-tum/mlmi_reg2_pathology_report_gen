@@ -200,3 +200,107 @@ def test_structured_answer_skips_non_choice_nodes():
     assert [s.node_id for s in steps] == ["choice", "multi", "report"]
     assert backend.json_ids == ["choice"]
     assert backend.answer_ids == ["multi", "report"]
+
+
+def test_invalid_react_answer_retries_on_single_call_path(monkeypatch, tmp_path):
+    """A bad ReAct answer must not replay the whole A/B/C loop."""
+    import sys
+    import types
+
+    from agent import node_react as node_react_mod
+    from vision.cache import SlideCache
+
+    # Stub the TITAN import so traverse can build a retriever without weights.
+    fake_titan = types.ModuleType("vision.encoders.titan")
+    fake_titan.TitanEncoder = lambda: types.SimpleNamespace(encode_text=lambda q: None)
+    monkeypatch.setitem(sys.modules, "vision.encoders.titan", fake_titan)
+
+    graph = {
+        "patch": Node(
+            id="patch",
+            label="patch",
+            question="Pick one?",
+            tier=Tier.LOCAL_FEATURES,
+            node_kind=NodeKind.LOCAL,
+            interaction=InteractionType.SINGLE_SELECT,
+            description="",
+            options=["a", "b"],
+            edges={},
+            visual_policy=VisualPolicy.PATCH_RETRIEVE,
+            requires_visual_evidence=True,
+            is_leaf=True,
+            root=True,
+        ),
+    }
+
+    react_calls = []
+    react_bundle = VisualBundle(metadata={"visual": "patch_retrieve", "retrieved_patches": []})
+
+    def _fake_react(node, **kwargs):
+        react_calls.append(node.id)
+        return node_react_mod.NodeReactResult(
+            answer_key="not-an-option",
+            confidence=0.9,
+            node_traces=[],
+            bundle=react_bundle,
+        )
+
+    monkeypatch.setattr(node_react_mod, "run_node_react", _fake_react)
+
+    class _Backend(_RouteBackend):
+        def __init__(self):
+            super().__init__()
+            self.answer_bundles = []
+
+        def answer(self, node, visual, memory, *, extra_context=""):
+            self.answer_bundles.append(visual)
+            return super().answer(node, visual, memory, extra_context=extra_context)
+
+    backend = _Backend()
+    steps = traverse(
+        backend,
+        graph=graph,
+        root_id="patch",
+        node_react=True,
+        retriever_method="graph_guided",
+        slide_cache=SlideCache(slide_id="s.svs", cache_dir=tmp_path, thumbnail_path=None),
+    )
+
+    assert [s.node_id for s in steps] == ["patch"]
+    assert react_calls == ["patch"]  # ReAct ran once, not once per attempt
+    assert backend.answer_ids == ["patch"]
+    assert backend.answer_bundles == [react_bundle]  # fallback reuses ReAct evidence
+
+
+def test_node_react_falls_back_without_retriever():
+    """--node-react on a patch node without retriever/slide cache must not crash."""
+    graph = {
+        "patch": Node(
+            id="patch",
+            label="patch",
+            question="Pick one?",
+            tier=Tier.LOCAL_FEATURES,
+            node_kind=NodeKind.LOCAL,
+            interaction=InteractionType.SINGLE_SELECT,
+            description="",
+            options=["a", "b"],
+            edges={},
+            visual_policy=VisualPolicy.PATCH_RETRIEVE,
+            requires_visual_evidence=True,
+            is_leaf=True,
+            root=True,
+        ),
+    }
+
+    backend = _RouteBackend()
+    steps = traverse(
+        backend,
+        graph=graph,
+        root_id="patch",
+        node_react=True,
+        retriever_method="none",
+    )
+
+    assert [s.node_id for s in steps] == ["patch"]
+    assert backend.json_ids == []
+    assert backend.answer_ids == ["patch"]

@@ -37,10 +37,10 @@ def test_graph_guided_forwards_paired_region_kwargs(tmp_path):
         level="20x",
         exclude={1},
         anchor_coord_lv0=(1000, 2000),
-        min_dist_lv0_px=2048,
+        min_dist_pool_px=2048,
         wsi_path=None,
         return_images=False,
     )
 
     assert inner.kwargs["anchor_coord_lv0"] == (1000, 2000)
-    assert inner.kwargs["min_dist_lv0_px"] == 2048
+    assert inner.kwargs["min_dist_pool_px"] == 2048

@@ -12,7 +12,12 @@ from graph.schema import Node
 from retrieval.base import PatchRetriever
 from vision.backends import VisualBundle
 from vision.cache import SlideCache
-from vision.mag_config import clamp_runtime_zoom, fixed_retrieval_pool, paired_regions_config
+from vision.mag_config import (
+    clamp_runtime_zoom,
+    fixed_retrieval_pool,
+    node_react_max_iters,
+    paired_regions_config,
+)
 from vision.thumbnail import _bundle_from_retrieved
 from vision.wsi_io import zoom_crop_at_coord
 
@@ -22,17 +27,63 @@ class NodeReactResult:
     answer_key: str
     confidence: float
     node_traces: list[dict[str, Any]]
+    bundle: VisualBundle | None = None
+
+
+# Nodes / answers that localize tumor bulk. paired_regions nodes must sample
+# away from these coords (CAP/ISGyP: background endometrium and stage/extent are
+# assessed off the mass).
+_TUMOR_TOKENS = ("mass", "carcinoma", "tumor", "sarcoma", "malignan")
+_NON_TUMOR_ANSWERS = (
+    "none_benign",
+    "none_of_above",
+    "not_applicable",
+    "unsure",
+    "atypia_only",
+)
 
 
 def _steps_for_retrieval(prior_steps: list) -> list[tuple[str, str]]:
     return [(s.node_id, s.answer) for s in prior_steps]
 
 
+def _step_localizes_tumor(step: Any) -> bool:
+    answer = str(getattr(step, "answer", "") or "").lower()
+    if answer in _NON_TUMOR_ANSWERS:
+        return False
+    node_id = str(getattr(step, "node_id", "") or "").lower()
+    return any(t in node_id for t in _TUMOR_TOKENS) or any(
+        t in answer for t in _TUMOR_TOKENS
+    )
+
+
+def tumor_anchor_from_steps(prior_steps: list) -> tuple[int, int] | None:
+    """Top-ranked patch coord of the most recent tumor-localizing chain step.
+
+    Requires that step to have been answered with ReAct, since only its traces
+    carry retrieved coords. Returns None when the chain has no tumor evidence.
+    """
+    for step in reversed(prior_steps or []):
+        if not _step_localizes_tumor(step):
+            continue
+        for trace in reversed(getattr(step, "node_traces", None) or []):
+            patches = trace.get("patches") or []
+            if not patches:
+                continue
+            coord = patches[0].get("coord")
+            if coord is not None and len(coord) == 2:
+                return (int(coord[0]), int(coord[1]))
+    return None
+
+
 def _best_coord(bundle: VisualBundle) -> tuple[int, int] | None:
     patches = bundle.metadata.get("retrieved_patches") or []
     if not patches:
         return None
-    return tuple(patches[0].get("coord"))  # sorted by similarity in retriever
+    coord = patches[0].get("coord")  # sorted by similarity in retriever
+    if coord is None or len(coord) != 2:
+        return None
+    return (int(coord[0]), int(coord[1]))
 
 
 def _append_zoom_patch(
@@ -61,16 +112,27 @@ def run_node_react(
     slide_cache: SlideCache,
     wsi_path: Path | None,
     prior_steps: list,
-    max_iters: int = 3,
+    max_iters: int | None = None,
     paired_regions: bool = False,
+    extra_context: str = "",
 ) -> NodeReactResult:
     pool = fixed_retrieval_pool()
+    max_iters = node_react_max_iters() if max_iters is None else max_iters
     traces: list[dict[str, Any]] = []
     exclude: set[int] = set()
     anchor_coord: tuple[int, int] | None = None
+    bundle: VisualBundle | None = None
     paired_cfg = paired_regions_config()
     paired_enabled = paired_regions and bool(paired_cfg.get("enabled", True))
     paired_min_dist = int(paired_cfg.get("min_dist_20x_px", 2048))
+    paired_target = (
+        paired_enabled
+        and node.spatial_policy == "paired_regions"
+        and paired_min_dist > 0
+    )
+    # Preferred anchor: tumor bulk found earlier in the chain. Falls back to this
+    # node's own first hit when the chain carries no tumor coords.
+    tumor_anchor = tumor_anchor_from_steps(prior_steps) if paired_target else None
 
     last_answer_key = ""
     last_conf = 0.0
@@ -82,17 +144,19 @@ def run_node_react(
         )
 
         anchor_kw = {}
-        if (
-            it > 0
-            and paired_enabled
-            and node.spatial_policy == "paired_regions"
-            and anchor_coord is not None
-            and paired_min_dist > 0
-        ):
-            anchor_kw = {
-                "anchor_coord_lv0": anchor_coord,
-                "min_dist_lv0_px": paired_min_dist,
-            }
+        anchor_source = ""
+        if paired_target:
+            if tumor_anchor is not None:
+                active_anchor, anchor_source = tumor_anchor, "tumor_step"
+            elif it > 0 and anchor_coord is not None:
+                active_anchor, anchor_source = anchor_coord, "self_iter0"
+            else:
+                active_anchor = None
+            if active_anchor is not None:
+                anchor_kw = {
+                    "anchor_coord_lv0": active_anchor,
+                    "min_dist_pool_px": paired_min_dist,
+                }
 
         retrieved = retriever.retrieve(
             query,
@@ -112,6 +176,7 @@ def run_node_react(
         step_a_user = prompts.format_step_a_user(
             node=node,
             prior_steps=_steps_for_retrieval(prior_steps),
+            extra_context=extra_context,
         )
         draft, conf_a, raw_a = backend.complete_json(
             node,
@@ -140,14 +205,18 @@ def run_node_react(
         sufficient = bool(b.get("sufficient", False))
         missing_info = str(b.get("missing_info", "")).strip()
 
+        paired_active = bool(anchor_kw)
         trace: dict[str, Any] = {
             "iter": it,
             "pool": pool,
             "query": query,
+            "patches": bundle.metadata.get("retrieved_patches") or [],
             "paired_regions": {
-                "enabled": paired_enabled and node.spatial_policy == "paired_regions",
-                "anchor_coord_lv0": anchor_coord,
-                "min_dist_lv0_px": paired_min_dist if node.spatial_policy == "paired_regions" else 0,
+                "enabled": paired_target,
+                "applied": paired_active,
+                "anchor_source": anchor_source,
+                "anchor_coord_lv0": anchor_kw.get("anchor_coord_lv0"),
+                "min_dist_pool_px": paired_min_dist if paired_active else 0,
             },
             "draft": draft,
             "reflect": {"sufficient": sufficient, "missing_info": missing_info},
@@ -157,7 +226,12 @@ def run_node_react(
 
         if sufficient:
             traces.append(trace)
-            return NodeReactResult(answer_key=answer_key, confidence=last_conf, node_traces=traces)
+            return NodeReactResult(
+                answer_key=answer_key,
+                confidence=last_conf,
+                node_traces=traces,
+                bundle=bundle,
+            )
 
         step_c_user = prompts.format_step_c_user(
             node=node,
@@ -240,13 +314,22 @@ def run_node_react(
                         answer_key=answer_key,
                         confidence=last_conf,
                         node_traces=traces,
+                        bundle=bundle,
                     )
-        else:
-            # retrieve branch: build exclude set from previously returned global indices
-            for rp in retrieved:
-                exclude.add(int(rp.index))
+
+        # Still insufficient: exclude the patches already shown so the next
+        # iteration ranks different regions. Also covers a zoom that could not
+        # run (no WSI / no coord), which would otherwise re-retrieve the same
+        # patches and burn the remaining iterations on identical evidence.
+        for rp in retrieved:
+            exclude.add(int(rp.index))
 
         traces.append(trace)
 
-    return NodeReactResult(answer_key=last_answer_key, confidence=last_conf, node_traces=traces)
+    return NodeReactResult(
+        answer_key=last_answer_key,
+        confidence=last_conf,
+        node_traces=traces,
+        bundle=bundle,
+    )
 

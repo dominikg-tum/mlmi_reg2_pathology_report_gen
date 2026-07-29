@@ -1,16 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=lora-train
-#SBATCH --chdir=/mnt/home/dogakonuk/mlmi_reg2_pathology_report_gen
+#SBATCH --job-name=pathology-lora-train
+#SBATCH --chdir=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
 #SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
-#SBATCH --output=/mnt/home/dogakonuk/logs/lora_train_%j.out
-#SBATCH --error=/mnt/home/dogakonuk/logs/lora_train_%j.err
+#SBATCH --output=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/lora_train_%j.out
+#SBATCH --error=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/lora_train_%j.err
 #
 # LoRA fine-tune the Phase-1 node answerer (Qwen3-VL-8B) on training/samples.jsonl.
-# Owner: DOGA (fine-tuning lane).
+# Owner: DOGA (fine-tuning lane). Paths default to Dominik's pinned repo / logs;
+# override REPO_DIR / OUTPUT_DIR / LORA_ADAPTER_DIR for personal adapters.
 #
 # Prerequisite: training/samples.jsonl (scripts/cluster/build_training_jsonl.sh).
 #
@@ -18,16 +19,17 @@
 # env; run this as a separate job from the data build.
 #
 # Env overrides: REPO_DIR, EPOCHS, LR, LORA_R, BATCH_SIZE, GRAD_ACCUM,
-#                LOAD_IN_4BIT=1, TRAIN_JSONL, OUTPUT_DIR
+#                LOAD_IN_4BIT=1, TRAIN_JSONL, OUTPUT_DIR, LORA_ADAPTER_DIR
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-/mnt/home/dogakonuk/mlmi_reg2_pathology_report_gen}"
+PINNED_DEFAULT="/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen"
+REPO_DIR="${REPO_DIR:-${MLMI_PINNED_REPO:-${PINNED_DEFAULT}}}"
 # shellcheck source=load_paths.sh
 source "${REPO_DIR}/scripts/cluster/load_paths.sh"
 load_cluster_paths "${REPO_DIR}/configs/paths.yaml"
 
-LOG_DIR="${LOG_DIR:-/mnt/home/dogakonuk/logs}"
+LOG_DIR="${LOG_DIR:-${LOGS_DIR}}"
 mkdir -p "${LOG_DIR}"
 
 EPOCHS="${EPOCHS:-3}"
@@ -36,7 +38,7 @@ LORA_R="${LORA_R:-16}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 GRAD_ACCUM="${GRAD_ACCUM:-8}"
 TRAIN_JSONL="${TRAIN_JSONL:-${REPO_DIR}/training/samples.jsonl}"
-OUTPUT_DIR="${OUTPUT_DIR:-${LORA_ADAPTER_DIR:-/mnt/home/dogakonuk/lora/qwen3vl-uterus/adapter}}"
+OUTPUT_DIR="${OUTPUT_DIR:-${LORA_ADAPTER_DIR:-${WORK_DIR}/lora/qwen3vl-uterus/adapter}}"
 
 FOURBIT_FLAG=""
 if [[ "${LOAD_IN_4BIT:-0}" == "1" ]]; then
@@ -48,7 +50,7 @@ readarray -t _ENROOT_HF_ENV < <(cluster_enroot_hf_env)
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   "${_ENROOT_HF_ENV[@]}" \
-  --env USER="${USER:-dogakonuk}" --env LOGNAME="${USER:-dogakonuk}" \
+  --env USER="${USER}" --env LOGNAME="${USER}" \
   "${CONTAINER}" \
   bash -lc "
     set -euo pipefail

@@ -24,13 +24,15 @@
 #     scripts/cluster/run_baseline_batch.sh
 #
 #   # Full test array (count test cases in stamped chains.jsonl, then --array=0-(N-1)):
-#   # After cases.csv restamp expect ~70 test cases -> --array=0-69
+#   # After cases.csv restamp expect 70 test cases -> --array=0-69.
+#   # Prefer: bash scripts/cluster/submit_baseline_batch.sh --baseline a
+#   # which derives END from the live case count.
 #   BASELINE=a sbatch --job-name=path-baseline-a-test --array=0-69 \
 #     --export=NONE,BASELINE=a,SPLIT=test,MLMI_PINNED_REPO=... \
 #     scripts/cluster/run_baseline_batch.sh
 #
 # Env:
-#   BASELINE=a|b1|b2|p0|p1|p2|p3|naive   (default: a)
+#   BASELINE=a|b1|b2|b2_cap|p0|p1|p2|p3|naive   (default: a)
 #   SPLIT=test                           (default: test)
 #   SLIDE_ID=<case_key>                  optional single-case override (GT slide_id string)
 #   BACKEND=qwen|dummy|finetuned         (default: qwen)
@@ -71,7 +73,7 @@ fi
 CONTAINER="${PERSONAL_CONTAINER:-${CONTAINER}}"
 
 HYBRID_PIP=""
-if [[ "${BASELINE}" == "b2" ]]; then
+if [[ "${BASELINE}" == "b2" || "${BASELINE}" == "b2_cap" ]]; then
   HYBRID_PIP="$(cluster_hybridrag_pip_snippet)"
 fi
 
@@ -106,7 +108,7 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   bash -lc "
     set -euo pipefail
     cd '${REPO}'
-    pip install -q openai pyyaml pandas openpyxl 2>/dev/null || true
+    pip install -q openai pyyaml pandas openpyxl
 ${HYBRID_PIP}
     mapfile -t ARGS < '${ARGS_FILE}'
     python -m scripts.inference.run_baseline_batch \"\${ARGS[@]}\"

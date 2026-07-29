@@ -120,6 +120,7 @@ def test_ensure_loaded_uses_manifest_without_langchain(tmp_path: Path, monkeypat
         *,
         split="train",
         reference_dir=None,
+        include_reference=None,
         force_rebuild=False,
     ):
         self.ensemble_retriever = object()
@@ -128,6 +129,43 @@ def test_ensure_loaded_uses_manifest_without_langchain(tmp_path: Path, monkeypat
 
     assert mem.ensure_loaded(manifest_path=manifest) is True
     assert mem.ensemble_retriever is not None
+
+
+def test_ensure_loaded_respects_nocap_include_reference(tmp_path: Path, monkeypatch):
+    xlsx = tmp_path / "labels.xlsx"
+    _write_mini_xlsx(xlsx, n=3)
+    chroma = tmp_path / "chroma_db"
+    chroma.mkdir()
+    manifest = tmp_path / "hybridrag_manifest_nocap.json"
+    write_hybridrag_manifest(
+        manifest,
+        source_path=xlsx,
+        chroma_storage=chroma,
+        split="train",
+        document_count=2,
+        variant="nocap",
+        include_reference=False,
+    )
+
+    seen: dict[str, object] = {}
+
+    def fake_build_index(
+        self,
+        train_reports_path,
+        *,
+        split="train",
+        reference_dir=None,
+        include_reference=None,
+        force_rebuild=False,
+    ):
+        seen["include_reference"] = include_reference
+        seen["reference_dir"] = reference_dir
+        self.ensemble_retriever = object()
+
+    monkeypatch.setattr(HybridRAGMemory, "build_index", fake_build_index)
+    mem = HybridRAGMemory(variant="nocap", chroma_storage=chroma, manifest_path=manifest)
+    assert mem.ensure_loaded() is True
+    assert seen["include_reference"] is False
 
 
 def test_ensure_loaded_false_when_index_missing(tmp_path: Path):
@@ -189,6 +227,63 @@ def test_hybridrag_manifest_includes_reference_fields(tmp_path: Path):
     assert loaded["reference_document_count"] == 12
     assert loaded["report_document_count"] == 10
     assert loaded["reference_dir"].endswith("reference")
+    assert loaded["variant"] == "cap"
+    assert loaded["include_reference"] is True
+
+
+def test_hybridrag_manifest_nocap_omits_reference_dir(tmp_path: Path):
+    manifest = tmp_path / "hybridrag_manifest_nocap.json"
+    write_hybridrag_manifest(
+        manifest,
+        source_path=tmp_path / "labels.xlsx",
+        chroma_storage=tmp_path / "chroma_nocap",
+        split="train",
+        document_count=10,
+        report_document_count=10,
+        reference_document_count=0,
+        variant="nocap",
+        include_reference=False,
+    )
+    loaded = read_hybridrag_manifest(manifest)
+    assert loaded is not None
+    assert loaded["variant"] == "nocap"
+    assert loaded["include_reference"] is False
+    assert "reference_dir" not in loaded
+
+
+def test_resolve_hybridrag_paths_variants():
+    from memory.hybridrag import resolve_hybridrag_paths
+
+    nocap = resolve_hybridrag_paths("nocap")
+    cap = resolve_hybridrag_paths("cap")
+    assert nocap["include_reference"] is False
+    assert cap["include_reference"] is True
+    assert nocap["chroma_storage"] != cap["chroma_storage"]
+    assert nocap["manifest_path"] != cap["manifest_path"]
+
+
+def test_get_semantic_memory_hybridrag_variants(monkeypatch):
+    from memory import base as memory_base
+
+    created: list[str] = []
+
+    class FakeHybrid:
+        def __init__(self, *, variant=None, **kwargs):
+            created.append(variant)
+            self.variant = variant
+
+        def ensure_loaded(self, **kwargs):
+            return True
+
+    import memory.hybridrag as hybridrag_mod
+
+    monkeypatch.setattr(hybridrag_mod, "HybridRAGMemory", FakeHybrid)
+    # get_semantic_memory imports HybridRAGMemory from memory.hybridrag at call time
+    mem_nocap = memory_base.get_semantic_memory("hybridrag")
+    mem_cap = memory_base.get_semantic_memory("hybridrag_cap")
+    assert created == ["nocap", "cap"]
+    assert mem_nocap.variant == "nocap"
+    assert mem_cap.variant == "cap"
 
 
 def test_corpus_fingerprint_stable_and_sensitive_to_corpus(tmp_path: Path):
@@ -319,7 +414,8 @@ def test_build_index_loads_chroma_when_fingerprint_matches(tmp_path: Path, monke
         split="train",
         report_docs=report_docs,
         reference_docs=[],
-        reference_dir=ref_dir,
+        reference_dir=None,
+        include_reference=False,
     )
     write_corpus_fingerprint(chroma, fingerprint)
 
@@ -359,8 +455,8 @@ def test_build_index_loads_chroma_when_fingerprint_matches(tmp_path: Path, monke
     monkeypatch.setitem(sys.modules, "langchain_core.documents", core_documents)
     monkeypatch.setattr(HybridRAGMemory, "embeddings", property(lambda self: MagicMock()))
 
-    mem = HybridRAGMemory(chroma_storage=chroma)
-    mem.build_index(str(xlsx), split="train", reference_dir=ref_dir)
+    mem = HybridRAGMemory(chroma_storage=chroma, include_reference=False)
+    mem.build_index(str(xlsx), split="train", include_reference=False)
 
     fake_chroma_cls.assert_called_once()
     fake_chroma_cls.from_documents.assert_not_called()

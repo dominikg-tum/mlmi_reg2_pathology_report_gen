@@ -428,7 +428,14 @@ class HippoRAG2Memory:
 
         return candidates
 
-    def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
+    def retrieve(
+        self,
+        node: Node,
+        query: str,
+        *,
+        k: int = 5,
+        exclude_case_key: str | None = None,
+    ) -> str:
         """
         Retrieves most relevant context from the knowledge graph based on query.
         Uses Personalized PageRank (PPR) over semantic triples to find reasoning paths.
@@ -437,6 +444,7 @@ class HippoRAG2Memory:
             node (Node): Current node in the diagnostic graph.
             query (str): Raw search string from the agent.
             k (int): Number of top passages to return.
+            exclude_case_key: Drop passages belonging to the case under evaluation.
 
         Returns:
             str: A formatted string concatenating the top-k retrieved passages.
@@ -464,11 +472,17 @@ class HippoRAG2Memory:
         # If no triples left, perform a standard dense vector search on the raw passages
         if not filtered_triples:
             pa_sims = self.passage_embs @ q_emb
-            top_idx = np.argsort(pa_sims)[::-1][:k]
+            ranked = np.argsort(pa_sims)[::-1]
             results = []
-            for i in top_idx:
+            for i in ranked:
                 p = self.passages[i]
-                results.append(f"[Source: {p['id']} | Dense-Score: {pa_sims[i]:.4f}]\n{p['text']}")
+                if _passage_matches_case(str(p.get("id", "")), exclude_case_key):
+                    continue
+                results.append(
+                    f"[Source: {p['id']} | Dense-Score: {pa_sims[i]:.4f}]\n{p['text']}"
+                )
+                if len(results) >= k:
+                    break
             return "\n\n---\n\n".join(results)
 
         # Initialize base probabilities for Personalized PageRank (start at 0 for all nodes)
@@ -515,11 +529,34 @@ class HippoRAG2Memory:
         ranked_passages.sort(key=lambda x: x[1], reverse=True)
 
         formatted_results = []
-        for passage, score in ranked_passages[:k]:
+        for passage, score in ranked_passages:
+            if _passage_matches_case(str(passage.get("id", "")), exclude_case_key):
+                continue
             source_info = f"Source: {passage['id']}" if passage['id'] else "Source: Unknown"
             formatted_results.append(f"[{source_info} | PPR-Score: {score:.4f}]\n{passage['text']}")
+            if len(formatted_results) >= k:
+                break
 
         return "\n\n---\n\n".join(formatted_results)
+
+
+def _passage_matches_case(passage_id: str, exclude_case_key: str | None) -> bool:
+    """True when a HippoRAG passage id belongs to the excluded case."""
+    if not exclude_case_key:
+        return False
+    tokens = [part.strip() for part in exclude_case_key.replace(";", ",").split(",") if part.strip()]
+    if not tokens:
+        return False
+    pid = str(passage_id or "")
+    for tok in tokens:
+        if pid == tok or pid.startswith(f"{tok}_chain_"):
+            return True
+        # Multi-WSI case key stored as the full comma-joined string.
+        if tok in pid and (pid == exclude_case_key or pid.startswith(f"{exclude_case_key}_chain_")):
+            return True
+    if pid == exclude_case_key or pid.startswith(f"{exclude_case_key}_chain_"):
+        return True
+    return False
 
 
 def load_config() -> dict[str, Any]:

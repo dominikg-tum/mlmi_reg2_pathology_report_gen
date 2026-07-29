@@ -9,13 +9,22 @@
 #SBATCH --output=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/build_hybridrag_%j.out
 #SBATCH --error=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/logs/build_hybridrag_%j.err
 #
-# Build HybridRAG Chroma + BM25 index from train-split labels xlsx + reference chunks.
-# Split filter uses cases.csv (via wsi_name_map), not xlsx row RNG.
+# Build HybridRAG Chroma + BM25 index (train reports ± CAP reference chunks).
 #
 # Usage:
-#   FORCE_REBUILD=1 sbatch --export=NONE,FORCE_REBUILD=1 \
-#     scripts/cluster/build_hybridrag_index.sh
-# Coordinate before FORCE_REBUILD on the shared chroma path (Nick).
+#   # reports-only (baseline b2)
+#   VARIANT=nocap FORCE_REBUILD=1 sbatch --export=NONE,VARIANT,FORCE_REBUILD \
+#     --job-name=path-hybridrag-nocap scripts/cluster/build_hybridrag_index.sh
+#
+#   # reports + CAP/WHO refs (baseline b2_cap)
+#   VARIANT=cap FORCE_REBUILD=1 sbatch --export=NONE,VARIANT,FORCE_REBUILD \
+#     --job-name=path-hybridrag-cap scripts/cluster/build_hybridrag_index.sh
+#
+#   # both ablation stores in one job
+#   VARIANT=both FORCE_REBUILD=1 sbatch --export=NONE,VARIANT,FORCE_REBUILD \
+#     --job-name=path-hybridrag-both scripts/cluster/build_hybridrag_index.sh
+#
+# Coordinate before FORCE_REBUILD on shared chroma paths (Nick).
 
 set -euo pipefail
 
@@ -25,6 +34,7 @@ PINNED_REPO="${MLMI_PINNED_REPO:-/mnt/projects/mlmi/TUMUntera/dominik_garstenaue
 export MLMI_PINNED_REPO="${PINNED_REPO}"
 
 SPLIT="${SPLIT:-train}"
+VARIANT="${VARIANT:-nocap}"
 FORCE_REBUILD="${FORCE_REBUILD:-}"
 
 # shellcheck source=load_paths.sh
@@ -42,7 +52,24 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
     set -euo pipefail
     cd '${REPO}'
 $(cluster_hybridrag_pip_snippet)
-    ARGS=(python -m scripts.memory.build_hybridrag_index --split '${SPLIT}')
-    [[ -n '${FORCE_REBUILD}' ]] && ARGS+=(--force-rebuild)
-    \"\${ARGS[@]}\"
+    build_one() {
+      local variant=\"\$1\"
+      local args=(python -m scripts.memory.build_hybridrag_index --split '${SPLIT}' --variant \"\${variant}\")
+      [[ -n '${FORCE_REBUILD}' ]] && args+=(--force-rebuild)
+      echo \"Building HybridRAG variant=\${variant} ...\"
+      \"\${args[@]}\"
+    }
+    case '${VARIANT}' in
+      both)
+        build_one nocap
+        build_one cap
+        ;;
+      nocap|cap)
+        build_one '${VARIANT}'
+        ;;
+      *)
+        echo \"Unknown VARIANT=${VARIANT}; use nocap|cap|both\" >&2
+        exit 2
+        ;;
+    esac
   "

@@ -26,11 +26,64 @@ from memory.base import SemanticMemory
 
 # Path to repository root directory
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST_PATH = REPO_ROOT / "data" / "memory" / "hybridrag_manifest.json"
+DEFAULT_MANIFEST_PATH = REPO_ROOT / "data" / "memory" / "hybridrag_manifest_nocap.json"
 DEFAULT_REFERENCE_DIR = REPO_ROOT / "data" / "memory" / "reference"
+HYBRIDRAG_VARIANTS = ("nocap", "cap")
 ReportDocument = dict[str, Any]
 
 _REFERENCE_CHUNK_REQUIRED = frozenset({"id", "title", "text", "source", "source_type"})
+
+
+def normalize_hybridrag_variant(variant: str | None) -> str:
+    """Map aliases to ``nocap`` or ``cap``."""
+    raw = (variant or "nocap").strip().lower()
+    aliases = {
+        "nocap": "nocap",
+        "no_cap": "nocap",
+        "no-cap": "nocap",
+        "reports": "nocap",
+        "native": "nocap",
+        "cap": "cap",
+        "with_cap": "cap",
+        "with-cap": "cap",
+        "reference": "cap",
+    }
+    if raw not in aliases:
+        raise ValueError(
+            f"Unknown HybridRAG variant {variant!r}; expected one of {sorted(aliases)}"
+        )
+    return aliases[raw]
+
+
+def resolve_hybridrag_paths(variant: str | None = "nocap") -> dict[str, Any]:
+    """Resolve Chroma dir, manifest path, and reference policy for a variant."""
+    name = normalize_hybridrag_variant(variant)
+    cfg = load_config().get("rag", {})
+    if name == "cap":
+        chroma_raw = cfg.get("chroma_db_storage_cap") or cfg.get("chroma_db_storage")
+        manifest_raw = cfg.get(
+            "hybridrag_manifest_cap", "data/memory/hybridrag_manifest_cap.json"
+        )
+        include_reference = True
+    else:
+        chroma_raw = cfg.get("chroma_db_storage_nocap") or cfg.get("chroma_db_storage")
+        manifest_raw = cfg.get(
+            "hybridrag_manifest_nocap", "data/memory/hybridrag_manifest_nocap.json"
+        )
+        include_reference = False
+
+    chroma = Path(chroma_raw)
+    manifest = Path(manifest_raw)
+    if not manifest.is_absolute():
+        manifest = REPO_ROOT / manifest
+    reference = get_reference_dir_default() if include_reference else None
+    return {
+        "variant": name,
+        "chroma_storage": chroma,
+        "manifest_path": manifest,
+        "include_reference": include_reference,
+        "reference_dir": reference,
+    }
 
 
 class HybridRAGMemory(SemanticMemory):
@@ -42,17 +95,53 @@ class HybridRAGMemory(SemanticMemory):
     of a pathology report. BM25 ensures that highly specific biomarkers
     and abbreviations (e.g., "P40", "WT1") are not missed due to vector dilution.
 
-    Index contents: train-split case reports plus optional reference chunks
-    under ``data/memory/reference/**/*.jsonl``.
+    Index contents: train-split case reports, optionally plus CAP/reference chunks
+    under ``data/memory/reference/**/*.jsonl`` (``variant="cap"``).
     """
 
-    def __init__(self, *, chroma_storage: str | Path | None = None):
+    def __init__(
+        self,
+        *,
+        chroma_storage: str | Path | None = None,
+        variant: str | None = None,
+        manifest_path: str | Path | None = None,
+        include_reference: bool | None = None,
+    ):
         """
-        Initializes the HybridRAGMemory, setting up storage paths and the
-        domain-specific embedding model.
+        Prefer ``variant="nocap"|"cap"`` so chroma + manifest resolve from
+        ``configs/paths.yaml``. Explicit paths override the resolved defaults.
         """
-        self.chroma_storage = (
-            Path(chroma_storage) if chroma_storage is not None else get_chroma_storage_default()
+        use_variant = variant is not None or chroma_storage is None
+        if use_variant:
+            paths = resolve_hybridrag_paths(variant or "nocap")
+            self.variant = str(paths["variant"])
+            self.chroma_storage = (
+                Path(chroma_storage) if chroma_storage is not None else paths["chroma_storage"]
+            )
+            self.manifest_path = (
+                Path(manifest_path) if manifest_path is not None else paths["manifest_path"]
+            )
+            self.include_reference = (
+                bool(include_reference)
+                if include_reference is not None
+                else bool(paths["include_reference"])
+            )
+        else:
+            self.variant = (
+                normalize_hybridrag_variant("cap" if include_reference else "nocap")
+                if include_reference is not None
+                else "nocap"
+            )
+            self.chroma_storage = Path(chroma_storage)  # type: ignore[arg-type]
+            self.manifest_path = (
+                Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
+            )
+            self.include_reference = (
+                bool(include_reference) if include_reference is not None else False
+            )
+
+        self.reference_dir = (
+            get_reference_dir_default() if self.include_reference else None
         )
         self.vector_storage = None
         self.bm25_retriever = None
@@ -77,6 +166,7 @@ class HybridRAGMemory(SemanticMemory):
         *,
         split: str = "train",
         reference_dir: str | Path | None = None,
+        include_reference: bool | None = None,
         force_rebuild: bool = False,
     ) -> None:
         """
@@ -89,6 +179,9 @@ class HybridRAGMemory(SemanticMemory):
             train_reports_path: Path to the Excel file containing case reports.
             split: Which dataset split to index from the spreadsheet (default: train).
             reference_dir: Root directory scanned for ``**/*.jsonl`` reference chunks.
+            include_reference: When False, skip reference chunks (nocap ablation).
+                When True, load from ``reference_dir`` or the default CAP/reference dir.
+                When None, use ``self.include_reference``.
             force_rebuild: Delete existing Chroma storage and rebuild embeddings.
 
         Raises:
@@ -96,16 +189,32 @@ class HybridRAGMemory(SemanticMemory):
             RuntimeError: If an existing Chroma index does not match the current
                 corpus fingerprint and ``force_rebuild`` is False.
         """
-        ref_dir = Path(reference_dir) if reference_dir is not None else get_reference_dir_default()
+        use_refs = (
+            self.include_reference if include_reference is None else bool(include_reference)
+        )
+        self.include_reference = use_refs
         source_path = Path(train_reports_path)
         report_docs = load_report_documents(source_path, split=split)
-        reference_docs = load_reference_documents(ref_dir)
+        if use_refs:
+            ref_dir = (
+                Path(reference_dir)
+                if reference_dir is not None
+                else (self.reference_dir or get_reference_dir_default())
+            )
+            reference_docs = load_reference_documents(ref_dir)
+            self.reference_dir = ref_dir
+        else:
+            ref_dir = None
+            reference_docs = []
+            self.reference_dir = None
+
         corpus_fingerprint = compute_corpus_fingerprint(
             source_path=source_path,
             split=split,
             report_docs=report_docs,
             reference_docs=reference_docs,
             reference_dir=ref_dir,
+            include_reference=use_refs,
         )
 
         # Delete existing index if force_build
@@ -131,9 +240,11 @@ class HybridRAGMemory(SemanticMemory):
             if stored_digest != corpus_fingerprint["digest"]:
                 raise RuntimeError(
                     "RAG: Existing Chroma index does not match the current corpus "
-                    f"(source={source_path}, split={split!r}, reference_dir={ref_dir}). "
+                    f"(source={source_path}, split={split!r}, variant={self.variant}, "
+                    f"include_reference={use_refs}, reference_dir={ref_dir}). "
                     "Rebuild with force_rebuild=True or: "
-                    "python -m scripts.memory.build_hybridrag_index --force-rebuild"
+                    "python -m scripts.memory.build_hybridrag_index --variant "
+                    f"{self.variant} --force-rebuild"
                 )
 
         documents = _as_langchain_documents(report_docs + reference_docs)
@@ -155,14 +266,10 @@ class HybridRAGMemory(SemanticMemory):
             )
             write_corpus_fingerprint(self.chroma_storage, corpus_fingerprint)
 
-        # Create retriever in initialization progress
         self.vector_retriever = self.vector_storage.as_retriever()
-
-        # Create BM25 retriever
-        self.bm25_retriever = BM25Retriever.from_documents(documents, preprocess_func=clean_tokenize)
-
-        # Combining semantic and BM25 retriever into ensemble
-        # Could also do ablation study on weights
+        self.bm25_retriever = BM25Retriever.from_documents(
+            documents, preprocess_func=clean_tokenize
+        )
         self.ensemble_retriever = EnsembleRetriever(
             retrievers=[self.vector_retriever, self.bm25_retriever],
             weights=[0.65, 0.35],
@@ -173,28 +280,50 @@ class HybridRAGMemory(SemanticMemory):
         if self.ensemble_retriever is not None:
             return True
 
-        manifest = read_hybridrag_manifest(manifest_path)
+        path = Path(manifest_path) if manifest_path is not None else self.manifest_path
+        manifest = read_hybridrag_manifest(path)
         if manifest:
             chroma_path = Path(manifest["chroma_storage"])
             source_path = Path(manifest["source_path"])
             if chroma_path.exists() and source_path.exists():
                 self.chroma_storage = chroma_path
+                if "variant" in manifest:
+                    self.variant = normalize_hybridrag_variant(str(manifest["variant"]))
+                if "include_reference" in manifest:
+                    include_reference = bool(manifest["include_reference"])
+                else:
+                    # Legacy manifests: presence of reference_dir implies CAP corpus.
+                    include_reference = bool(manifest.get("reference_dir"))
+                self.include_reference = include_reference
                 ref_dir = manifest.get("reference_dir")
                 self.build_index(
                     str(source_path),
                     split=str(manifest.get("split", "train")),
                     reference_dir=ref_dir,
+                    include_reference=include_reference,
                 )
                 return self.ensemble_retriever is not None
 
         if self.chroma_storage.exists():
             source_path = get_labels_xlsx_default()
             if source_path.exists():
-                self.build_index(str(source_path), split="train")
+                self.build_index(
+                    str(source_path),
+                    split="train",
+                    include_reference=self.include_reference,
+                    reference_dir=self.reference_dir,
+                )
                 return self.ensemble_retriever is not None
         return False
 
-    def retrieve(self, node: Node, query: str, *, k: int = 5) -> str:
+    def retrieve(
+        self,
+        node: Node,
+        query: str,
+        *,
+        k: int = 5,
+        exclude_case_key: str | None = None,
+    ) -> str:
         """
         Retrieves most relevant context from the index based on query and node.
 
@@ -205,6 +334,7 @@ class HybridRAGMemory(SemanticMemory):
             node: Current node in the diagnostic graph.
             query: Raw search string.
             k: Base number of documents to retrieve.
+            exclude_case_key: Drop hits from this case (train self-retrieve guard).
 
         Returns:
             A formatted string concatenating the top-k retrieved documents.
@@ -224,15 +354,19 @@ class HybridRAGMemory(SemanticMemory):
         # Update query to include node context
         enriched_query = f"[{node.tier.value}] {node.question} {query}".strip()
 
-        # Update retrievers to search for top k matches
-        self.bm25_retriever.k = effective_k
-        self.vector_retriever.search_kwargs = {"k": effective_k}
-
-        # Invoke query; fetch extra candidates when reranking reference chunks
+        # Fetch extra candidates so self-exclude / reference rerank still fills k.
         fetch_k = effective_k * 2 if _prefer_reference_for_node(node) else effective_k
+        if exclude_case_key:
+            fetch_k = max(fetch_k * 2, effective_k + 4)
         self.bm25_retriever.k = fetch_k
         self.vector_retriever.search_kwargs = {"k": fetch_k}
         results = self.ensemble_retriever.invoke(enriched_query)
+        if exclude_case_key:
+            results = [
+                doc
+                for doc in results
+                if not _doc_matches_case(doc, exclude_case_key)
+            ]
         results = _rerank_for_node(results, node)[:effective_k]
 
         formatted_results = []
@@ -247,6 +381,22 @@ class HybridRAGMemory(SemanticMemory):
                 f"{doc.page_content}"
             )
         return "\n\n---\n\n".join(formatted_results)
+
+
+def _case_key_tokens(raw: str) -> set[str]:
+    return {part.strip() for part in str(raw).replace(";", ",").split(",") if part.strip()}
+
+
+def _doc_matches_case(doc, exclude_case_key: str) -> bool:
+    """True when a HybridRAG hit belongs to the case under evaluation."""
+    exclude_tokens = _case_key_tokens(exclude_case_key)
+    if not exclude_tokens:
+        return False
+    meta = getattr(doc, "metadata", None) or {}
+    candidates = set()
+    for key in ("case_key", "slide_id"):
+        candidates |= _case_key_tokens(str(meta.get(key) or ""))
+    return bool(candidates & exclude_tokens)
 
 
 def _effective_k_for_node(node: Node, k: int) -> int:
@@ -458,17 +608,26 @@ def compute_corpus_fingerprint(
     report_docs: list[ReportDocument],
     reference_docs: list[ReportDocument],
     reference_dir: str | Path | None = None,
+    include_reference: bool = True,
 ) -> dict[str, Any]:
     """
     Fingerprint covering source path, split, and report/reference document contents.
 
     Used to refuse silently reusing a Chroma index built for a different corpus.
     """
-    ref_dir = Path(reference_dir) if reference_dir is not None else get_reference_dir_default()
+    if include_reference and reference_dir is not None:
+        ref_dir = Path(reference_dir)
+        ref_dir_str = str(ref_dir.resolve()) if ref_dir.exists() else str(ref_dir)
+    elif include_reference:
+        ref_dir = get_reference_dir_default()
+        ref_dir_str = str(ref_dir.resolve()) if ref_dir.exists() else str(ref_dir)
+    else:
+        ref_dir_str = ""
     payload = {
         "source_path": str(Path(source_path).resolve()),
         "split": split,
-        "reference_dir": str(ref_dir.resolve()) if ref_dir.exists() else str(ref_dir),
+        "include_reference": bool(include_reference),
+        "reference_dir": ref_dir_str,
         "report_document_count": len(report_docs),
         "reference_document_count": len(reference_docs),
         "documents": [
@@ -486,6 +645,7 @@ def compute_corpus_fingerprint(
         "digest": digest,
         "source_path": payload["source_path"],
         "split": payload["split"],
+        "include_reference": payload["include_reference"],
         "reference_dir": payload["reference_dir"],
         "report_document_count": payload["report_document_count"],
         "reference_document_count": payload["reference_document_count"],
@@ -518,9 +678,21 @@ def write_hybridrag_manifest(
     report_document_count: int | None = None,
     reference_document_count: int = 0,
     reference_dir: Path | None = None,
+    variant: str | None = None,
+    include_reference: bool | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    use_refs = (
+        bool(include_reference)
+        if include_reference is not None
+        else reference_dir is not None
+    )
+    resolved_variant = normalize_hybridrag_variant(
+        variant or ("cap" if use_refs else "nocap")
+    )
     payload: dict[str, Any] = {
+        "variant": resolved_variant,
+        "include_reference": use_refs,
         "source_path": str(source_path.resolve()),
         "chroma_storage": str(chroma_storage.resolve()),
         "split": split,
@@ -530,7 +702,7 @@ def write_hybridrag_manifest(
         else document_count - reference_document_count,
         "reference_document_count": reference_document_count,
     }
-    if reference_dir is not None:
+    if use_refs and reference_dir is not None:
         payload["reference_dir"] = str(reference_dir.resolve())
     path.write_text(json.dumps(payload, indent=2) + "\n")
 

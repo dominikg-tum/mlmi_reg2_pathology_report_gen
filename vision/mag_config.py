@@ -88,6 +88,15 @@ def paired_regions_config() -> dict:
     return retrieval_config().get("paired_regions", {})
 
 
+def node_react_config() -> dict:
+    return load_vision_config().get("node_react", {})
+
+
+def node_react_max_iters() -> int:
+    """Bounded ReAct iteration budget per graph node (Steps A/B/C)."""
+    return max(int(node_react_config().get("max_iters", 3)), 1)
+
+
 def fixed_retrieval_pool() -> str:
     """CONCH retrieval pool zoom key (default: 20x)."""
     pool = str(retrieval_config().get("fixed_pool", "20x"))

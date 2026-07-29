@@ -50,6 +50,7 @@ def traverse(
     node_react: bool = False,
     structured_answer: bool = False,
     paired_regions: bool = False,
+    react_max_iters: int | None = None,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
@@ -82,6 +83,40 @@ def traverse(
             break
 
         query = build_query(node, steps)
+        choice_node = node.interaction in (
+            InteractionType.SINGLE_SELECT,
+            InteractionType.BOOLEAN,
+        )
+        # run_node_react does its own retrieval per iteration, so the navigator
+        # must not retrieve (and pay for patch image IO) on these nodes.
+        react_skip_reasons: list[str] = []
+        if node_react:
+            if not choice_node:
+                react_skip_reasons.append("not_choice_node")
+            if not node.needs_patch_retrieval():
+                react_skip_reasons.append("no_patch_retrieval")
+            if not hasattr(backend, "complete_json"):
+                react_skip_reasons.append("backend_no_complete_json")
+            if retriever is None:
+                react_skip_reasons.append("no_retriever")
+            if slide_cache is None:
+                react_skip_reasons.append("no_slide_cache")
+            if fixed_visual_bundle is not None:
+                react_skip_reasons.append("fixed_visual_bundle")
+        use_react = bool(node_react) and not react_skip_reasons
+        structured_skip_reasons: list[str] = []
+        if structured_answer and not use_react:
+            if not choice_node:
+                structured_skip_reasons.append("not_choice_node")
+            if not hasattr(backend, "complete_json"):
+                structured_skip_reasons.append("backend_no_complete_json")
+        use_structured = bool(structured_answer) and not use_react and not structured_skip_reasons
+        answer_branch = "plain"
+        answer_branch_skip_reason = ""
+        if node_react and react_skip_reasons:
+            answer_branch_skip_reason = ",".join(react_skip_reasons)
+        elif structured_answer and structured_skip_reasons:
+            answer_branch_skip_reason = ",".join(structured_skip_reasons)
         if fixed_visual_bundle is not None:
             visual_bundle = fixed_visual_bundle
         else:
@@ -90,7 +125,9 @@ def traverse(
                 slide_cache,
                 steps,
                 query=query,
-                retriever=retriever if node.needs_patch_retrieval() else None,
+                retriever=(
+                    retriever if node.needs_patch_retrieval() and not use_react else None
+                ),
             )
         if retrieval_log is not None:
             patches_meta = visual_bundle.metadata.get("retrieved_patches")
@@ -105,10 +142,15 @@ def traverse(
                     }
                 )
         extra = mem.retrieve_context(node, query)
+        semantic_extra = mem.semantic_context(node, query)
         answer = ""
         confidence = 0.0
         last_raw = ""
         node_traces: list[dict[str, Any]] = []
+        # Every ReAct attempt retrieves, so the log keeps all of them even when
+        # only the last attempt's traces end up on the chain step.
+        react_log: list[tuple[int, dict[str, Any]]] = []
+        react_failed = False
         for attempt in range(max_answer_attempts):
             retry_note = ""
             if attempt:
@@ -117,16 +159,7 @@ def traverse(
                     "answer. Return exactly one allowed answer key and nothing else."
                 )
 
-            choice_node = node.interaction in (
-                InteractionType.SINGLE_SELECT,
-                InteractionType.BOOLEAN,
-            )
-            if (
-                node_react
-                and choice_node
-                and node.needs_patch_retrieval()
-                and hasattr(backend, "complete_json")
-            ):
+            if use_react and not react_failed:
                 from agent.node_react import run_node_react
 
                 react = run_node_react(
@@ -137,25 +170,32 @@ def traverse(
                     wsi_path=wsi_path,
                     prior_steps=steps,
                     paired_regions=paired_regions,
+                    extra_context=semantic_extra,
+                    max_iters=react_max_iters,
                 )
                 last_raw = react.answer_key
                 node_traces = react.node_traces
+                react_log.extend((attempt, tr) for tr in react.node_traces)
                 normalized = normalize_answer(react.answer_key, node)
-                if normalized is None:
-                    continue
-                answer, confidence = normalized, float(react.confidence)
-                break
+                if normalized is not None:
+                    answer, confidence = normalized, float(react.confidence)
+                    answer_branch = "react"
+                    break
+                # Retry on the cheap single-call path instead of replaying the
+                # whole A/B/C loop; keep the evidence ReAct already retrieved.
+                react_failed = True
+                answer_branch_skip_reason = "react_invalid_answer"
+                if react.bundle is not None:
+                    visual_bundle = react.bundle
+                continue
 
-            if (
-                structured_answer
-                and choice_node
-                and hasattr(backend, "complete_json")
-            ):
+            if use_structured:
                 from agent import prompts
 
                 user_prompt = prompts.format_step_a_user(
                     node=node,
                     prior_steps=[(s.node_id, s.answer) for s in steps],
+                    extra_context=semantic_extra,
                 )
                 draft, raw_confidence, _raw = backend.complete_json(
                     node,
@@ -170,6 +210,7 @@ def traverse(
                 answer = normalized
                 confidence = float(draft.get("confidence", raw_confidence) or raw_confidence)
                 last_raw = answer_key
+                answer_branch = "structured"
                 break
 
             raw, raw_confidence = backend.answer(
@@ -184,8 +225,25 @@ def traverse(
                 continue
             if not answer or raw_confidence > confidence:
                 answer, confidence = normalized, raw_confidence
+                answer_branch = "plain"
             if not should_retry(confidence, confidence_threshold):
                 break
+
+        if retrieval_log is not None:
+            for react_attempt, react_trace in react_log:
+                if not react_trace.get("patches"):
+                    continue
+                retrieval_log.append(
+                    {
+                        "node_id": node.id,
+                        "pool": react_trace.get("pool", fixed_retrieval_pool()),
+                        "node_zoom_hint": node.mag_band,
+                        "query": react_trace.get("query", node.retrieval_text),
+                        "answer_attempt": react_attempt,
+                        "react_iter": react_trace.get("iter"),
+                        "patches": react_trace["patches"],
+                    }
+                )
 
         if not answer:
             raise ValueError(
@@ -209,6 +267,8 @@ def traverse(
                 confidence,
                 next_question=next_q,
                 node_traces=node_traces,
+                answer_branch=answer_branch,
+                answer_branch_skip_reason=answer_branch_skip_reason,
             )
         )
         mem.append(node.id, node.question, answer)
@@ -243,6 +303,8 @@ def chain_to_dict(
                 "answer": s.answer,
                 "next_question": s.next_question,
                 "node_traces": s.node_traces,
+                "answer_branch": s.answer_branch,
+                "answer_branch_skip_reason": s.answer_branch_skip_reason,
             }
             for s in steps
         ],
