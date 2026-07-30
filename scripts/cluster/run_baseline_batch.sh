@@ -80,6 +80,11 @@ if [[ "${BASELINE}" == "b2" || "${BASELINE}" == "b2_cap" ]]; then
   HYBRID_PIP="$(cluster_hybridrag_pip_snippet)"
 fi
 
+TITAN_PIP=""
+if [[ "${BASELINE}" == p0 || "${BASELINE}" == p1 || "${BASELINE}" == p2 || "${BASELINE}" == p3 ]]; then
+  TITAN_PIP="$(cluster_titan_pip_snippet)"
+fi
+
 # Build argv outside enroot so set -u / array vs SLIDE_ID is handled here.
 ARGS_FILE="$(mktemp "${TMPDIR:-/tmp}/baseline_args.XXXXXX")"
 {
@@ -113,6 +118,7 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
     cd '${REPO}'
     pip install -q openai pyyaml pandas openpyxl
 ${HYBRID_PIP}
+${TITAN_PIP}
     mapfile -t ARGS < '${ARGS_FILE}'
     python -m scripts.inference.run_baseline_batch \"\${ARGS[@]}\"
   "
