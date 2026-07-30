@@ -23,7 +23,7 @@
 #
 # Usage:
 #   # Smoke one case by key:
-#   sbatch --export=NONE,BASELINE=a,SPLIT=test,BACKEND=qwen,SLIDE_ID='CASE.svs,...',MLMI_PINNED_REPO=... \
+#   sbatch --export=ALL,BASELINE=a,SPLIT=test,BACKEND=qwen,SLIDE_ID='CASE.svs,...',MLMI_PINNED_REPO=... \
 #     scripts/cluster/run_baseline_batch.sh
 #
 #   # Full test array (count test cases in stamped chains.jsonl, then --array=0-(N-1)):
@@ -31,7 +31,7 @@
 #   # Prefer: bash scripts/cluster/submit_baseline_batch.sh --baseline a
 #   # which derives END from the live case count.
 #   BASELINE=a sbatch --job-name=path-baseline-a-test --array=0-69 \
-#     --export=NONE,BASELINE=a,SPLIT=test,MLMI_PINNED_REPO=... \
+#     --export=ALL,BASELINE=a,SPLIT=test,MLMI_PINNED_REPO=... \
 #     scripts/cluster/run_baseline_batch.sh
 #
 # Env:

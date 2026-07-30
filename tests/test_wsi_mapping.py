@@ -80,6 +80,22 @@ def test_build_slide_cache_resolves_uuid_via_name_map(
     assert sc.embedding_path_for_level("20x") == emb
 
 
+def test_patch_embeddings_exist_resolves_uuid(tmp_path: Path, monkeypatch) -> None:
+    from baselines.agent_runner import patch_embeddings_exist
+
+    csv_path = _write_map(tmp_path)
+    wm.load_wsi_name_map.cache_clear()
+    monkeypatch.setattr(wm, "DEFAULT_NAME_MAP_CSV", csv_path)
+
+    cache_root = tmp_path / "cache"
+    tum_dir = cache_root / "TUM_Uterus_0001.svs"
+    tum_dir.mkdir(parents=True)
+    (tum_dir / "patch_embeddings_20x.pt").write_bytes(b"x")
+
+    assert patch_embeddings_exist(cache_root, "aaaa-bbbb.svs")
+    assert not patch_embeddings_exist(cache_root, "unknown-uuid.svs")
+
+
 def test_find_named_svs_falls_back_on_nonzero_returncode(tmp_path: Path, monkeypatch) -> None:
     nested = tmp_path / "nested"
     nested.mkdir()
