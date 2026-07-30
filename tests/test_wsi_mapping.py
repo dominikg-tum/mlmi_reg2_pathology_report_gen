@@ -58,6 +58,28 @@ def test_repo_name_map_has_464_rows() -> None:
     assert rows[-1].slide_id == "TUM_Uterus_0464.svs"
 
 
+def test_build_slide_cache_resolves_uuid_via_name_map(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Chains carry disk_name UUIDs; offline cache dirs use TUM_Uterus_XXXX.svs."""
+    from vision.cache import build_slide_cache
+
+    csv_path = _write_map(tmp_path)
+    wm.load_wsi_name_map.cache_clear()
+    monkeypatch.setattr(wm, "DEFAULT_NAME_MAP_CSV", csv_path)
+
+    cache_root = tmp_path / "cache"
+    tum_dir = cache_root / "TUM_Uterus_0001.svs"
+    tum_dir.mkdir(parents=True)
+    emb = tum_dir / "patch_embeddings_20x.pt"
+    emb.write_bytes(b"x")
+
+    sc = build_slide_cache(cache_root, "aaaa-bbbb.svs")
+    assert sc.slide_id == "TUM_Uterus_0001.svs"
+    assert sc.cache_dir == tum_dir
+    assert sc.embedding_path_for_level("20x") == emb
+
+
 def test_find_named_svs_falls_back_on_nonzero_returncode(tmp_path: Path, monkeypatch) -> None:
     nested = tmp_path / "nested"
     nested.mkdir()

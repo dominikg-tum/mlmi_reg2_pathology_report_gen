@@ -8,6 +8,9 @@ from graph.schema import Node, VisualPolicy
 from vision.backends import VisualBundle
 from vision.cache import SlideCache, resolve_thumbnail_path
 from vision.mag_config import fixed_retrieval_pool
+from vision.wsi_mapping import locate_svs_path, row_for_name
+
+
 def _resolve_wsi_path(
     slide_cache: SlideCache | None,
     *,
@@ -18,6 +21,15 @@ def _resolve_wsi_path(
         return wsi_path
     if slide_cache is None or wsi_data_dir is None:
         return None
+    row = row_for_name(slide_cache.slide_id)
+    if row is not None:
+        try:
+            return locate_svs_path(wsi_data_dir, row)
+        except FileNotFoundError:
+            pass
+    direct = wsi_data_dir / slide_cache.slide_id
+    if direct.is_file():
+        return direct
     matches = list(wsi_data_dir.rglob(slide_cache.slide_id))
     return matches[0] if matches else None
 

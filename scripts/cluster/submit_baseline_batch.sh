@@ -40,13 +40,9 @@ done
 
 cd "${PINNED_REPO}"
 
-# Validate baseline key against the Python registry before queueing jobs.
-VALID_BASELINES="$(
-  PYTHONPATH="${PINNED_REPO}${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<'PY'
-from scripts.inference.run_baseline_batch import BASELINES
-print(" ".join(sorted(BASELINES)))
-PY
-)"
+# Keep this list in sync with scripts/inference/run_baseline_batch.py BASELINES.
+# Do NOT import that module on the head node: it pulls torch/VLM deps and can hang.
+VALID_BASELINES="a b1 b2 b2_cap naive p0 p1 p2 p3"
 # shellcheck disable=SC2086
 if ! printf '%s\n' ${VALID_BASELINES} | grep -qx -- "${BASELINE}"; then
   echo "Unknown BASELINE='${BASELINE}'. Valid: ${VALID_BASELINES}" >&2
@@ -54,17 +50,23 @@ if ! printf '%s\n' ${VALID_BASELINES} | grep -qx -- "${BASELINE}"; then
 fi
 
 if [[ "${END_SET}" -eq 0 ]]; then
+  # Prefer a cheap line count over importing extraction on a loaded head node.
+  # Fallback to python only if the jsonl is missing the expected shape.
+  CHAINS_FILE="${PINNED_REPO}/data/labels/chains.jsonl"
+  if [[ ! -f "${CHAINS_FILE}" ]]; then
+    echo "Missing ${CHAINS_FILE}" >&2
+    exit 1
+  fi
   CASE_COUNT="$(
     PYTHONPATH="${PINNED_REPO}${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<PY
 from pathlib import Path
 from extraction.case_ids import load_cases_from_chains
-chains = Path("${PINNED_REPO}") / "data" / "labels" / "chains.jsonl"
-cases = load_cases_from_chains(chains, split="${SPLIT}")
+cases = load_cases_from_chains(Path("${CHAINS_FILE}"), split="${SPLIT}")
 print(len(cases))
 PY
   )"
   if [[ -z "${CASE_COUNT}" || "${CASE_COUNT}" -lt 1 ]]; then
-    echo "No cases found for split=${SPLIT} in ${PINNED_REPO}/data/labels/chains.jsonl" >&2
+    echo "No cases found for split=${SPLIT} in ${CHAINS_FILE}" >&2
     exit 1
   fi
   END=$((CASE_COUNT - 1))
@@ -76,15 +78,35 @@ if (( END < START )); then
   exit 2
 fi
 
+# SLURM parks jobs as "user env retrieval failed requeued held" when --export=NONE
+# env lookup fails on a loaded head. Held jobs never run but still count against the
+# QOS cap, which would stall this loop forever.
+release_held_jobs() {
+  local held job
+  held=$(squeue -u "${USER}" -h -o '%i %r' 2>/dev/null \
+    | awk '/held/ {print $1}')
+  for job in ${held}; do
+    if scontrol release "${job}" 2>/dev/null; then
+      echo "Released held job ${job}" >&2
+    fi
+  done
+}
+
 wait_for_slot() {
+  local waited=0
   while true; do
     local opp_jobs
     opp_jobs=$(squeue -u "${USER}" -h --qos=students_opportunistic 2>/dev/null | wc -l)
     if ((opp_jobs < MAX_OPPORTUNISTIC_JOBS)); then
       return 0
     fi
+    # After a couple of idle polls, assume anything still held is wedged.
+    if ((waited >= 2)); then
+      release_held_jobs
+    fi
     echo "Waiting for students_opportunistic slot (${opp_jobs}/${MAX_OPPORTUNISTIC_JOBS})..."
     sleep "${POLL_SEC}"
+    waited=$((waited + 1))
   done
 }
 
@@ -100,7 +122,7 @@ for idx in $(seq "${START}" "${END}"); do
 
   if ! out=$(
     sbatch \
-      --export=NONE,BASELINE="${BASELINE}",SPLIT="${SPLIT}",BACKEND="${BACKEND}",MLMI_PINNED_REPO="${PINNED_REPO}" \
+      --export=ALL,BASELINE="${BASELINE}",SPLIT="${SPLIT}",BACKEND="${BACKEND}",MLMI_PINNED_REPO="${PINNED_REPO}" \
       --array="${idx}" \
       --job-name="${JOB_NAME}" \
       scripts/cluster/run_baseline_batch.sh

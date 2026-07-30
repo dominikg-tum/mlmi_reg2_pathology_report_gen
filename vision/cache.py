@@ -14,6 +14,7 @@ from vision.mag_config import (
     normalize_zoom,
     thumbnail_config,
 )
+from vision.wsi_mapping import canonical_slide_id
 
 
 @dataclass
@@ -111,15 +112,17 @@ class SlideCache:
 
 
 def slide_cache_dir(cache_root: Path, slide_id: str) -> Path:
-    safe = slide_id.replace(",", "_").replace("/", "_")
+    canonical = canonical_slide_id(slide_id)
+    safe = canonical.replace(",", "_").replace("/", "_")
     return cache_root / safe
 
 
 def slide_id_to_stem(slide_id: str) -> str:
     """TUM_Uterus_0001.svs → TUM_Uterus_0001 (matches dataset JPEG stems)."""
-    if slide_id.lower().endswith(".svs"):
-        return slide_id[:-4]
-    return slide_id
+    canonical = canonical_slide_id(slide_id)
+    if canonical.lower().endswith(".svs"):
+        return canonical[:-4]
+    return canonical
 
 
 def dataset_thumbnail_dir(vcfg: dict | None = None) -> Path | None:
@@ -178,10 +181,13 @@ def build_slide_cache(
     *,
     vcfg: dict | None = None,
 ) -> SlideCache:
-    d = slide_cache_dir(cache_root, slide_id)
-    thumb = resolve_thumbnail_path(cache_root, slide_id, vcfg=vcfg)
+    # Store the canonical id: caches, the thumbnail bank and the raw .svs on disk
+    # are all keyed by TUM slide_id, while chains carry disk_name UUIDs.
+    canonical = canonical_slide_id(slide_id)
+    d = slide_cache_dir(cache_root, canonical)
+    thumb = resolve_thumbnail_path(cache_root, canonical, vcfg=vcfg)
     return SlideCache(
-        slide_id=slide_id,
+        slide_id=canonical,
         cache_dir=d,
         thumbnail_path=thumb,
         slide_embedding_path=d / "slide_embedding.pt",

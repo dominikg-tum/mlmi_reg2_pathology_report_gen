@@ -1,7 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=pathology-baseline-batch
 #SBATCH --chdir=/mnt/projects/mlmi/TUMUntera/dominik_garstenauer/repos/mlmi_reg2_pathology_report_gen
-#SBATCH --export=NONE
+# --export=ALL, not NONE: NONE makes slurmd fetch the user env via `su - user`,
+# which fails under head-node process pressure and parks the job as
+# "user env retrieval failed requeued held". The script re-exports what it needs.
+#SBATCH --export=ALL
 #SBATCH --partition=24g
 #SBATCH --qos=students_opportunistic
 # Request a GPU even though the baseline client is CPU-side (Qwen is a
