@@ -96,14 +96,12 @@ wait_for_slot() {
   local waited=0
   while true; do
     local opp_jobs
-    opp_jobs=$(squeue -u "${USER}" -h --qos=students_opportunistic 2>/dev/null | wc -l)
+    # Only RUNNING/PENDING hold the QOS cap; COMPLETING (CG) must not block forever.
+    opp_jobs=$(squeue -u "${USER}" -h --qos=students_opportunistic -t RUNNING,PENDING 2>/dev/null | wc -l)
     if ((opp_jobs < MAX_OPPORTUNISTIC_JOBS)); then
       return 0
     fi
-    # After a couple of idle polls, assume anything still held is wedged.
-    if ((waited >= 2)); then
-      release_held_jobs
-    fi
+    release_held_jobs
     echo "Waiting for students_opportunistic slot (${opp_jobs}/${MAX_OPPORTUNISTIC_JOBS})..."
     sleep "${POLL_SEC}"
     waited=$((waited + 1))
