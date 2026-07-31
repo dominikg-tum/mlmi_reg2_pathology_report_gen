@@ -1,20 +1,53 @@
-"""Plot LoRA train loss from HuggingFace trainer_state.json (or a train .out log).
+"""Plot LoRA train loss from CSV, trainer_state.json, or a train .out log.
 
-Example (on cluster or laptop after scp):
+Examples:
+    # Laptop (from checked-in artifacts):
     python -m scripts.training.plot_lora_training \\
-        --trainer-state /mnt/home/dogakonuk/lora/qwen3vl-uterus/adapter/checkpoint-160/trainer_state.json \\
+        --csv training/artifacts/lora_v1/train_loss.csv \\
+        --output-dir training/artifacts/lora_v1
+
+    # Cluster:
+    python -m scripts.training.plot_lora_training \\
+        --trainer-state .../checkpoint-160/trainer_state.json \\
         --output-dir /mnt/home/dogakonuk/lora/eval/plots
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 from pathlib import Path
 
 
-def load_from_trainer_state(path: Path) -> list[dict]:
+def _opt_float(value: str | None) -> float | None:
+    if value is None or value == "" or value == "None":
+        return None
+    return float(value)
+
+
+def load_from_csv(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    with path.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if not row.get("loss"):
+                continue
+            step_raw = row.get("step")
+            rows.append(
+                {
+                    "step": int(float(step_raw)) if step_raw not in (None, "", "None") else None,
+                    "epoch": _opt_float(row.get("epoch")),
+                    "loss": float(row["loss"]),
+                    "learning_rate": _opt_float(row.get("learning_rate")),
+                    "mean_token_accuracy": _opt_float(row.get("mean_token_accuracy")),
+                }
+            )
+    return rows
+
+
+def load_from_trainer_state(path: Path) -> tuple[list[dict], dict]:
     st = json.loads(path.read_text(encoding="utf-8"))
     rows = []
     for h in st.get("log_history", []):
@@ -39,18 +72,15 @@ def load_from_trainer_state(path: Path) -> list[dict]:
 
 def load_from_train_log(path: Path) -> list[dict]:
     """Parse Trainer dict lines printed to SLURM .out (fallback)."""
-    pat = re.compile(r"\{[^{}]*'loss'\s*:\s*'?(?P<loss>[0-9.eE+-]+)'?[^{}]*\}")
     rows: list[dict] = []
     text = path.read_text(encoding="utf-8", errors="replace")
     step = 0
-    for m in pat.finditer(text):
-        blob = m.group(0).replace("'", '"')
-        # Keys may still be single-quoted; use ast-safe fallback via regex fields.
+    for m in re.finditer(r"\{[^{}]*'loss'\s*:\s*'?(?P<loss>[0-9.eE+-]+)'?[^{}]*\}", text):
         loss_m = re.search(r"'loss'\s*:\s*'?(?P<v>[0-9.eE+-]+)'?", m.group(0))
         ep_m = re.search(r"'epoch'\s*:\s*'?(?P<v>[0-9.eE+-]+)'?", m.group(0))
         if not loss_m:
             continue
-        step += 5  # logging_steps default; overwritten if step present later
+        step += 5  # logging_steps default
         rows.append(
             {
                 "step": step,
@@ -65,23 +95,35 @@ def load_from_train_log(path: Path) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--csv", type=Path, default=None, help="train_loss.csv from artifacts")
     parser.add_argument("--trainer-state", type=Path, default=None)
     parser.add_argument("--train-log", type=Path, default=None, help="Fallback: lora_train_*.out")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
 
-    if not args.trainer_state and not args.train_log:
-        raise SystemExit("Provide --trainer-state and/or --train-log")
+    if not args.csv and not args.trainer_state and not args.train_log:
+        raise SystemExit("Provide --csv and/or --trainer-state and/or --train-log")
 
     meta: dict = {}
-    if args.trainer_state and args.trainer_state.exists():
+    if args.csv and args.csv.exists():
+        rows = load_from_csv(args.csv)
+        source = str(args.csv)
+        summary_sidecar = args.csv.with_name("train_loss_summary.json")
+        if summary_sidecar.exists():
+            try:
+                meta = json.loads(summary_sidecar.read_text(encoding="utf-8")).get(
+                    "trainer_meta", {}
+                )
+            except json.JSONDecodeError:
+                meta = {}
+    elif args.trainer_state and args.trainer_state.exists():
         rows, meta = load_from_trainer_state(args.trainer_state)
         source = str(args.trainer_state)
     elif args.train_log and args.train_log.exists():
         rows = load_from_train_log(args.train_log)
         source = str(args.train_log)
     else:
-        raise SystemExit("No readable trainer_state or train log")
+        raise SystemExit("No readable --csv / trainer_state / train log")
 
     if not rows:
         raise SystemExit(f"No loss entries found in {source}")
@@ -89,13 +131,21 @@ def main() -> None:
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
     csv_path = out / "train_loss.csv"
-    with csv_path.open("w", encoding="utf-8") as f:
-        f.write("step,epoch,loss,learning_rate,mean_token_accuracy\n")
-        for r in rows:
-            f.write(
-                f"{r.get('step')},{r.get('epoch')},{r['loss']},"
-                f"{r.get('learning_rate')},{r.get('mean_token_accuracy')}\n"
+    # Don't clobber the input CSV if output-dir is the same folder.
+    if args.csv is None or csv_path.resolve() != args.csv.resolve():
+        with csv_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "step",
+                    "epoch",
+                    "loss",
+                    "learning_rate",
+                    "mean_token_accuracy",
+                ],
             )
+            writer.writeheader()
+            writer.writerows(rows)
 
     summary = {
         "source": source,
@@ -112,9 +162,12 @@ def main() -> None:
     (out / "train_loss_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     try:
+        import matplotlib
+
+        matplotlib.use("Agg")  # headless / no display
         import matplotlib.pyplot as plt
     except ImportError as exc:
-        print(f"Wrote {csv_path} (matplotlib missing: {exc}; skip PNG)")
+        print(f"CSV ready at {csv_path} (matplotlib missing: {exc}; skip PNG)")
         print(json.dumps(summary, indent=2))
         return
 
@@ -130,7 +183,6 @@ def main() -> None:
     png = out / "train_loss.png"
     fig.savefig(png, dpi=160)
     plt.close(fig)
-    print(f"Wrote {csv_path}")
     print(f"Wrote {png}")
     print(json.dumps(summary, indent=2))
 

@@ -1,0 +1,13 @@
+{
+  "source": "training\\artifacts\\lora_v1\\train_loss.csv",
+  "n_points": 32,
+  "first_loss": 1.488123893737793,
+  "last_loss": 0.04522848129272461,
+  "min_loss": 0.01746705025434494,
+  "trainer_meta": {
+    "epoch": 2.0,
+    "global_step": 160,
+    "best_metric": null
+  },
+  "note": "Train loss only \u2014 no eval_loss was logged (no val split / eval_strategy). Use held-out test node accuracy (base vs LoRA) as the overfit check."
+}

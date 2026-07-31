@@ -85,6 +85,19 @@ if [[ "${BASELINE}" == p0 || "${BASELINE}" == p1 || "${BASELINE}" == p2 || "${BA
   TITAN_PIP="$(cluster_titan_pip_snippet)"
 fi
 
+FT_PIP=""
+if [[ "${BACKEND}" == "finetuned" ]]; then
+  FT_PIP="$(
+    cat <<'EOF'
+pip install -q 'transformers>=4.57' 'peft>=0.13' accelerate 'qwen-vl-utils>=0.0.8' pillow
+EOF
+  )"
+fi
+
+# Optional override so LoRA arms do not overwrite base-Qwen runs.
+# Example: RUNS_DIR=$WORK_DIR/runs/baseline_a_flat_lora
+RUNS_DIR="${RUNS_DIR:-}"
+
 # Build argv outside enroot so set -u / array vs SLIDE_ID is handled here.
 ARGS_FILE="$(mktemp "${TMPDIR:-/tmp}/baseline_args.XXXXXX")"
 {
@@ -95,6 +108,10 @@ ARGS_FILE="$(mktemp "${TMPDIR:-/tmp}/baseline_args.XXXXXX")"
   echo "--backend"
   echo "${BACKEND}"
   echo "--skip-existing"
+  if [[ -n "${RUNS_DIR}" ]]; then
+    echo "--runs-dir"
+    echo "${RUNS_DIR}"
+  fi
   if [[ -n "${SLIDE_ID}" ]]; then
     echo "--slide-id"
     echo "${SLIDE_ID}"
@@ -112,6 +129,8 @@ ARGS_FILE="$(mktemp "${TMPDIR:-/tmp}/baseline_args.XXXXXX")"
 
 enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
   --env "QWEN_API_BASE_URL=${QWEN_API_BASE_URL:-}" \
+  --env "MLMI_ADAPTER_DIR=${MLMI_ADAPTER_DIR:-}" \
+  --env "LORA_ADAPTER_DIR=${LORA_ADAPTER_DIR:-}" \
   "${CONTAINER}" \
   bash -lc "
     set -euo pipefail
@@ -119,6 +138,7 @@ enroot start --rw --mount /mnt:/mnt --mount /tmp:/tmp \
     pip install -q openai pyyaml pandas openpyxl
 ${HYBRID_PIP}
 ${TITAN_PIP}
+${FT_PIP}
     mapfile -t ARGS < '${ARGS_FILE}'
     python -m scripts.inference.run_baseline_batch \"\${ARGS[@]}\"
   "
