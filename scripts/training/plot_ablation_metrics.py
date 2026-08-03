@@ -1,5 +1,10 @@
 """Bar charts: CoT vs Report metrics for a/p0 × base/LoRA ablation arms.
 
+Layout (team preference):
+  - x-axis = metrics (BPV, Edge-F1, …)
+  - colors / legend = arms (a_base, a_lora, p0_base, p0_lora)
+  - CoT and Report stay in separate figures
+
 Reads metrics.json files produced by ``python -m eval.run_eval --json-out ...``.
 """
 
@@ -22,24 +27,35 @@ DEFAULT_ARMS = (
     ("p0_lora", "baseline_p0_patch_cosine_lora"),
 )
 
+# Distinct colors per arm (stable legend order)
+ARM_COLORS = {
+    "a_base": "#1B4F72",   # navy
+    "a_lora": "#2E86C1",   # blue
+    "p0_base": "#B9770E",  # amber
+    "p0_lora": "#1D8348",  # green
+}
+
 COT_KEYS = (
-    ("binary_path_validity", "BPV"),
+    ("binary_path_validity", "Binary Path Val."),
+    ("final_diagnosis_accuracy", "Final Diag. Acc"),
     ("edge_f1", "Edge-F1"),
-    ("node_accuracy", "Node Acc"),
     ("mess", "MESS"),
-    ("diagnosis_label_accuracy", "Diag Acc"),
+    ("node_accuracy", "Node Accuracy"),
 )
 
 REPORT_KEYS = (
     ("rouge_l", "ROUGE-L"),
     ("bleu4", "BLEU-4"),
-    ("clinical_token_f1", "Clin F1"),
+    ("clinical_token_f1", "Clinical (proxy)"),
+    ("numeric_fidelity", "Num. FID"),
+    ("negation_consistency", "Negation Cons."),
+    # BERTScore omitted unless present in metrics.json (often skipped for speed).
+    ("bert_score_f1", "BERT"),
 )
 
 
 def _load_metrics(path: Path) -> dict:
-    data = json.loads(path.read_text())
-    # Prefer nested sections when present
+    data = json.loads(path.read_text(encoding="utf-8"))
     cot = data.get("cot") or {}
     rep = data.get("report") or {}
     flat = {
@@ -50,25 +66,38 @@ def _load_metrics(path: Path) -> dict:
     return flat
 
 
-def _bar_group(
+def _bar_by_metric(
     ax,
-    arms: list[str],
-    series: list[tuple[str, list[float]]],
+    metric_labels: list[str],
+    arm_series: list[tuple[str, list[float]]],
     title: str,
 ) -> None:
-    n_arms = len(arms)
-    n_series = len(series)
-    width = 0.8 / max(n_series, 1)
-    x = list(range(n_arms))
-    for i, (label, values) in enumerate(series):
-        offsets = [xi + (i - (n_series - 1) / 2) * width for xi in x]
-        ax.bar(offsets, values, width=width, label=label)
+    """Grouped bars: one group per metric on x; one color per arm."""
+    n_metrics = len(metric_labels)
+    n_arms = len(arm_series)
+    width = 0.8 / max(n_arms, 1)
+    x = list(range(n_metrics))
+    for i, (arm, values) in enumerate(arm_series):
+        offsets = [xi + (i - (n_arms - 1) / 2) * width for xi in x]
+        ax.bar(
+            offsets,
+            values,
+            width=width,
+            label=arm,
+            color=ARM_COLORS.get(arm),
+            edgecolor="white",
+            linewidth=0.4,
+        )
     ax.set_xticks(x)
-    ax.set_xticklabels(arms, rotation=15, ha="right")
+    ax.set_xticklabels(metric_labels, fontweight="bold")
+    ax.set_xlabel("Metric", fontweight="bold")
     ax.set_ylim(0, 1.05)
-    ax.set_ylabel("score")
-    ax.set_title(title)
-    ax.legend(fontsize=8, loc="upper left")
+    ax.set_ylabel("Score", fontweight="bold")
+    ax.tick_params(axis="y", labelsize=9)
+    for tick in ax.get_yticklabels():
+        tick.set_fontweight("bold")
+    ax.set_title(title, fontweight="bold")
+    ax.legend(title="variant", fontsize=9, loc="upper right")
     ax.grid(axis="y", alpha=0.3)
 
 
@@ -97,60 +126,74 @@ def main() -> None:
     out_dir = args.out_dir or (args.runs_root / "plots")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    arm_labels: list[str] = []
     rows: list[dict] = []
     for label, folder in DEFAULT_ARMS:
         path = args.runs_root / folder / args.metrics_name
         if not path.exists():
-            # Also allow flat layout: runs-root/metrics_<label>.json
             alt = args.runs_root / f"metrics_{label}.json"
             if alt.exists():
                 path = alt
             else:
                 raise SystemExit(f"Missing metrics for {label}: {path}")
         m = _load_metrics(path)
-        arm_labels.append(label)
-        row = {"arm": label, **{k: m.get(k) for k, _ in COT_KEYS + REPORT_KEYS}}
-        rows.append(row)
+        rows.append({"arm": label, **{k: m.get(k) for k, _ in COT_KEYS + REPORT_KEYS}})
 
-    # CoT figure
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    series = []
-    for key, pretty in COT_KEYS:
+    # CoT: x = metrics, colors = arms
+    cot_labels = [pretty for _, pretty in COT_KEYS]
+    cot_series = []
+    for r in rows:
         vals = []
-        for r in rows:
+        for key, _ in COT_KEYS:
             v = r.get(key)
             vals.append(float(v) if v is not None else 0.0)
-        series.append((pretty, vals))
-    _bar_group(ax, arm_labels, series, "CoT metrics (report node excluded)")
+        cot_series.append((r["arm"], vals))
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    _bar_by_metric(
+        ax,
+        cot_labels,
+        cot_series,
+        "Chain-of-Thought and Graph Metrics",
+    )
     fig.tight_layout()
     cot_png = out_dir / "ablation_cot_metrics.png"
     fig.savefig(cot_png, dpi=160)
     plt.close(fig)
 
-    # Report figure
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    series = []
+    # Report: same layout. Drop metrics that are missing for every arm (e.g. BERT skipped).
+    active_report_keys = []
     for key, pretty in REPORT_KEYS:
-        vals = [float(r.get(key) or 0.0) for r in rows]
-        series.append((pretty, vals))
-    _bar_group(ax, arm_labels, series, "Report metrics")
+        if any(r.get(key) is not None for r in rows):
+            active_report_keys.append((key, pretty))
+    if not active_report_keys:
+        active_report_keys = list(REPORT_KEYS[:3])
+
+    rep_labels = [pretty for _, pretty in active_report_keys]
+    rep_series = []
+    for r in rows:
+        vals = []
+        for key, _ in active_report_keys:
+            v = r.get(key)
+            vals.append(float(v) if v is not None else 0.0)
+        rep_series.append((r["arm"], vals))
+
+    fig, ax = plt.subplots(figsize=(11, 5))
+    _bar_by_metric(ax, rep_labels, rep_series, "Report Generation Metrics")
     fig.tight_layout()
     rep_png = out_dir / "ablation_report_metrics.png"
     fig.savefig(rep_png, dpi=160)
     plt.close(fig)
 
-    # Summary CSV + JSON
     csv_path = out_dir / "ablation_metrics_summary.csv"
     fieldnames = ["arm"] + [k for k, _ in COT_KEYS + REPORT_KEYS]
-    with csv_path.open("w", newline="") as f:
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows:
             w.writerow({k: r.get(k) for k in fieldnames})
 
     json_path = out_dir / "ablation_metrics_summary.json"
-    json_path.write_text(json.dumps(rows, indent=2) + "\n")
+    json_path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
 
     print(f"Wrote {cot_png}")
     print(f"Wrote {rep_png}")

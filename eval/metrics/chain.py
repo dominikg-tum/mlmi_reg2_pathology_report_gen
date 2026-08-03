@@ -12,24 +12,6 @@ from eval.schemas import CaseRecord, ChainStep
 REPORT_NODE_ID = "report"
 DIAGNOSIS_NODE_ID = "diagnosis"
 
-# Primary Final Diag Acc uses exact graph-key match (see ``diagnosis_label_accuracy``).
-DIAGNOSIS_KEY_TO_LABEL = {
-    "malignant": "malignant_tumor",
-    "premalignant": "precancerous_lesion",
-    "benign": "benign_tumor",
-    "non_neoplastic": "inflammatory_or_reactive",
-    "descriptive": "insufficient_or_uncertain",
-}
-
-FINAL_DIAGNOSIS_LABELS = (
-    "normal_or_no_significant_abnormality",
-    "benign_tumor",
-    "inflammatory_or_reactive",
-    "malignant_tumor",
-    "insufficient_or_uncertain",
-    "precancerous_lesion",
-)
-
 
 def cot_steps(record: CaseRecord, *, exclude_report: bool = True) -> list[ChainStep]:
     """Chain steps used for CoT metrics (optionally drop the report node)."""
@@ -146,27 +128,10 @@ def diagnosis_answer_key(record: CaseRecord) -> str:
     return ""
 
 
-def map_diagnosis_to_label(answer_key: str) -> str:
-    """Map graph diagnosis key → 6-way team label; empty if unknown."""
-    key = normalize_answer(answer_key)
-    if key in FINAL_DIAGNOSIS_LABELS:
-        return key
-    return DIAGNOSIS_KEY_TO_LABEL.get(key, "")
-
-
-def diagnosis_label_accuracy(pred: CaseRecord, gt: CaseRecord) -> Optional[float]:
-    """Exact match of diagnosis-node answer vs GT (graph keys). None if GT missing."""
+def final_diagnosis_accuracy(pred: CaseRecord, gt: CaseRecord) -> Optional[float]:
+    """Exact match of diagnosis-node answer_key vs GT. None if GT has no diagnosis."""
     gt_key = diagnosis_answer_key(gt)
     if not gt_key:
         return None
     pred_key = diagnosis_answer_key(pred)
     return 1.0 if pred_key == gt_key else 0.0
-
-
-def diagnosis_label_accuracy_6way(pred: CaseRecord, gt: CaseRecord) -> Optional[float]:
-    """Legacy: exact match after mapping graph keys → Xun 6-way labels."""
-    gt_label = map_diagnosis_to_label(diagnosis_answer_key(gt))
-    if not gt_label:
-        return None
-    pred_label = map_diagnosis_to_label(diagnosis_answer_key(pred))
-    return 1.0 if pred_label == gt_label else 0.0

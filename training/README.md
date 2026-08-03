@@ -3,6 +3,15 @@
 LoRA fine-tune the **Phase-1 node answerer** (default **Qwen3-VL-8B-Instruct**) so it
 answers each graph node from the retrieved patches better than zero-shot.
 
+**Report / presentation pack (merge-friendly):**
+
+| Resource | Path |
+|----------|------|
+| Process narrative | [`docs/fine_tuning/FINE_TUNING_PROCESS.md`](../docs/fine_tuning/FINE_TUNING_PROCESS.md) |
+| Phase-1 result tables | [`docs/fine_tuning/RESULTS_PHASE1.md`](../docs/fine_tuning/RESULTS_PHASE1.md) |
+| Metrics, plots, CSVs | [`artifacts/lora_v1/`](../artifacts/lora_v1/) |
+| Fetch from cluster | `bash scripts/local/fetch_lora_v1_artifacts.sh` |
+
 Pipeline (mirrors inference for train/serve parity):
 
 1. WP3 chains → `data/labels/chains.jsonl` (`scripts/cluster/build_chains.sh`), with

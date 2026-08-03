@@ -88,6 +88,18 @@ bash scripts/local/submit_offline_wsi_batch_remote.sh --handoff --start 0
 
 ---
 
+## Fetch LoRA v1 report artifacts (Doga)
+
+Pull cluster metrics / node-eval JSON into `artifacts/lora_v1/` (no adapter weights):
+
+```bash
+CLUSTER_SSH_HOST=dogakonuk@head.garching.camp.cluster \
+  bash scripts/local/fetch_lora_v1_artifacts.sh
+# optional: --with-predictions  --with-logs
+```
+
+Docs: `docs/fine_tuning/`. Inventory: `artifacts/lora_v1/MANIFEST.md`.
+
 ## Optional: TITAN slide embedding (Phase 2)
 
 Not run in the default pipeline. To add later for one slide:

@@ -9,8 +9,8 @@ from typing import Any, Optional
 
 from eval.metrics.chain import (
     binary_path_validity,
-    diagnosis_label_accuracy,
     edge_f1,
+    final_diagnosis_accuracy,
     mess_score,
     node_accuracy,
 )
@@ -82,7 +82,7 @@ def score_pairs(
         f1s.append(edge_f1(p, g, exclude_report=exclude_report)["f1"])
         messes.append(mess_score(p, g, exclude_report=exclude_report))
         node_accs.append(node_accuracy(p, g, exclude_report=exclude_report))
-        d = diagnosis_label_accuracy(p, g)
+        d = final_diagnosis_accuracy(p, g)
         if d is not None:
             diag_accs.append(d)
         rouges.append(rouge_l(p.report, g.report))
@@ -111,7 +111,7 @@ def score_pairs(
             "edge_f1": sum(f1s) / n if n else 0.0,
             "mess": sum(messes) / n if n else 0.0,
             "node_accuracy": sum(node_accs) / n if n else 0.0,
-            "diagnosis_label_accuracy": (
+            "final_diagnosis_accuracy": (
                 sum(diag_accs) / len(diag_accs) if diag_accs else None
             ),
             "n_diagnosis_scored": len(diag_accs),
@@ -130,7 +130,7 @@ def score_pairs(
         "edge_f1": sum(f1s) / n if n else 0.0,
         "mess": sum(messes) / n if n else 0.0,
         "node_accuracy": sum(node_accs) / n if n else 0.0,
-        "diagnosis_label_accuracy": (
+        "final_diagnosis_accuracy": (
             sum(diag_accs) / len(diag_accs) if diag_accs else None
         ),
         "rouge_l": sum(rouges) / n if n else 0.0,
@@ -153,12 +153,12 @@ def print_metrics(metrics: dict[str, Any], *, split: str = "") -> None:
     print(f"Edge-F1:              {cot['edge_f1']:.4f}")
     print(f"MESS:                 {cot['mess']:.4f}")
     print(f"Node Accuracy:        {cot['node_accuracy']:.4f}")
-    d = cot["diagnosis_label_accuracy"]
+    d = cot["final_diagnosis_accuracy"]
     if d is None:
-        print("Final Diag Acc (node key): N/A")
+        print("Final Diag Acc: N/A")
     else:
         print(
-            f"Final Diag Acc (node key): {d:.4f}  "
+            f"Final Diag Acc:         {d:.4f}  "
             f"(n={cot['n_diagnosis_scored']})"
         )
     print("--- Report ---")

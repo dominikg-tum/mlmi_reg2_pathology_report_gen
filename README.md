@@ -11,6 +11,8 @@ Step-wise diagnostic reasoning from uterine WSIs → **reasoning chain** + **fin
 | -------------------------------------------------------- | --------------------------------------- |
 | **[docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)** | Architecture, WPs, team lanes, commands |
 | [docs/cluster_setup.md](docs/cluster_setup.md)           | Garching cluster, enroot, SLURM, vLLM   |
+| [docs/fine_tuning/](docs/fine_tuning/)                   | LoRA fine-tuning process + Phase-1 results (Doga) |
+| [artifacts/lora_v1/](artifacts/lora_v1/)                   | Train curves, eval metrics, CoT/Report plots |
 
 
 ## Team workflow

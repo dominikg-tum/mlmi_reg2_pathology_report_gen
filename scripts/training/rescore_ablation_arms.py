@@ -85,7 +85,7 @@ def main() -> None:
                 "edge_f1": metrics.get("edge_f1"),
                 "node_accuracy": metrics.get("node_accuracy"),
                 "binary_path_validity": metrics.get("binary_path_validity"),
-                "diagnosis_label_accuracy": metrics.get("diagnosis_label_accuracy"),
+                "final_diagnosis_accuracy": metrics.get("final_diagnosis_accuracy"),
                 "rouge_l": metrics.get("rouge_l"),
                 "mess": metrics.get("mess"),
             }
@@ -100,7 +100,7 @@ def main() -> None:
         f"{'arm':12} {'BPV':>7} {'EdgeF1':>7} {'NodeAcc':>7} {'Diag':>7} {'ROUGE':>7}"
     )
     for r in summary:
-        d = r["diagnosis_label_accuracy"]
+        d = r["final_diagnosis_accuracy"]
         d_s = f"{d:.3f}" if d is not None else "  N/A"
         print(
             f"{r['arm']:12} {r['binary_path_validity']:7.3f} "

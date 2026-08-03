@@ -12,4 +12,14 @@ Prediction JSONL format (one case per line):
 {"slide_id": "abc.svs", "chain-of-thought": [{"question": "...", "answer": "...", "next_question": "..."}], "report": "..."}
 ```
 
-Metrics: Binary Path Validity, Edge-F1, MESS, ROUGE-L, BLEU-4, clinical proxy.
+Metrics:
+
+- **CoT** (by default the trailing `report` node is excluded from path metrics): Binary Path
+  Validity, Edge-F1, MESS, node accuracy, 6-way diagnosis label accuracy
+- **Report:** ROUGE-L, BLEU-4, clinical proxy, optional BERTScore, numeric fidelity, negation
+
+```bash
+python -m eval.run_eval --pred ... --gt ... --split test --skip-bert --json-out metrics.json
+```
+
+Phase-1 LoRA ablation artifacts and plots: [`artifacts/lora_v1/`](../artifacts/lora_v1/).
