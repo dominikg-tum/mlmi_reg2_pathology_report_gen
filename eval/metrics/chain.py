@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from eval.metrics.normalize import normalize_answer
@@ -11,8 +12,7 @@ from eval.schemas import CaseRecord, ChainStep
 REPORT_NODE_ID = "report"
 DIAGNOSIS_NODE_ID = "diagnosis"
 
-# Graph ``diagnosis`` answer_key → team 6-way final disease label (Xun / Dominik).
-# Provisional mapping until GT is stamped with the 6-way taxonomy directly.
+# Primary Final Diag Acc uses exact graph-key match (see ``diagnosis_label_accuracy``).
 DIAGNOSIS_KEY_TO_LABEL = {
     "malignant": "malignant_tumor",
     "premalignant": "precancerous_lesion",
@@ -123,11 +123,26 @@ def mess_score(pred: CaseRecord, gt: CaseRecord, *, exclude_report: bool = True)
         return len(pt & gt_set) / len(gt_set)
 
 
+def _extract_answer_key(raw: str) -> str:
+    """Bare key or JSON ``{"answer_key": ...}`` → normalized key string."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if text.startswith("{"):
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict) and obj.get("answer_key") is not None:
+                return normalize_answer(str(obj["answer_key"]))
+        except json.JSONDecodeError:
+            pass
+    return normalize_answer(text)
+
+
 def diagnosis_answer_key(record: CaseRecord) -> str:
-    """Raw ``diagnosis`` node answer_key (normalized), or empty if missing."""
+    """Normalized ``diagnosis`` node answer key, or empty if missing."""
     for s in record.chain:
         if s.node_id == DIAGNOSIS_NODE_ID:
-            return normalize_answer(s.answer)
+            return _extract_answer_key(s.answer)
     return ""
 
 
@@ -140,7 +155,16 @@ def map_diagnosis_to_label(answer_key: str) -> str:
 
 
 def diagnosis_label_accuracy(pred: CaseRecord, gt: CaseRecord) -> Optional[float]:
-    """1.0/0.0 if both sides map to a 6-way label; None if GT has no mappable diagnosis."""
+    """Exact match of diagnosis-node answer vs GT (graph keys). None if GT missing."""
+    gt_key = diagnosis_answer_key(gt)
+    if not gt_key:
+        return None
+    pred_key = diagnosis_answer_key(pred)
+    return 1.0 if pred_key == gt_key else 0.0
+
+
+def diagnosis_label_accuracy_6way(pred: CaseRecord, gt: CaseRecord) -> Optional[float]:
+    """Legacy: exact match after mapping graph keys → Xun 6-way labels."""
     gt_label = map_diagnosis_to_label(diagnosis_answer_key(gt))
     if not gt_label:
         return None

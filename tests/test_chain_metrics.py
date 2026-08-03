@@ -52,10 +52,27 @@ def test_edge_f1_and_node_acc_drop_report_answers():
     assert edge_f1(pred, gt, exclude_report=False)["f1"] < 1.0
 
 
-def test_diagnosis_label_accuracy_maps_graph_keys():
-    assert map_diagnosis_to_label("malignant") == "malignant_tumor"
+def test_diagnosis_label_accuracy_exact_graph_key():
     gt = _rec(["diagnosis"], {"diagnosis": "malignant"})
     pred_ok = _rec(["diagnosis"], {"diagnosis": "malignant"})
     pred_bad = _rec(["diagnosis"], {"diagnosis": "benign"})
     assert diagnosis_label_accuracy(pred_ok, gt) == 1.0
     assert diagnosis_label_accuracy(pred_bad, gt) == 0.0
+
+
+def test_diagnosis_answer_key_parses_json():
+    gt = _rec(
+        ["diagnosis"],
+        {"diagnosis": '{"answer_key": "non_neoplastic", "rationale": "", "confidence": 1.0}'},
+    )
+    pred = _rec(["diagnosis"], {"diagnosis": "non_neoplastic"})
+    assert diagnosis_label_accuracy(pred, gt) == 1.0
+
+
+def test_diagnosis_label_accuracy_6way_still_available():
+    from eval.metrics.chain import diagnosis_label_accuracy_6way
+
+    assert map_diagnosis_to_label("malignant") == "malignant_tumor"
+    gt = _rec(["diagnosis"], {"diagnosis": "malignant"})
+    pred = _rec(["diagnosis"], {"diagnosis": "malignant"})
+    assert diagnosis_label_accuracy_6way(pred, gt) == 1.0

@@ -155,10 +155,10 @@ def print_metrics(metrics: dict[str, Any], *, split: str = "") -> None:
     print(f"Node Accuracy:        {cot['node_accuracy']:.4f}")
     d = cot["diagnosis_label_accuracy"]
     if d is None:
-        print("Diagnosis Acc (6-way): N/A")
+        print("Final Diag Acc (node key): N/A")
     else:
         print(
-            f"Diagnosis Acc (6-way): {d:.4f}  "
+            f"Final Diag Acc (node key): {d:.4f}  "
             f"(n={cot['n_diagnosis_scored']})"
         )
     print("--- Report ---")
