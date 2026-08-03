@@ -1,0 +1,5 @@
+arm,binary_path_validity,final_diagnosis_accuracy,edge_f1,mess,node_accuracy,rouge_l,bleu4,clinical_token_f1,numeric_fidelity,negation_consistency,bert_score_f1
+a_base,0.0441,0.4118,0.2355,0.2467,0.2467,0.0446,0.0446,0.0446,0.0,0.675,
+a_lora,0.2941,0.5441,0.5081,0.5019,0.5019,0.024,0.024,0.024,0.0,0.9091,
+p0_base,0.0735,0.0882,0.2255,0.2741,0.2741,0.0391,0.0391,0.0391,0.0418,0.2353,
+p0_lora,0.3382,0.5588,0.531,0.511,0.511,0.0163,0.0163,0.0163,0.0,1.0,

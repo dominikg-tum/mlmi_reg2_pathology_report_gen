@@ -1,0 +1,32 @@
+{
+  "n_cases": 68,
+  "exclude_report_from_cot": true,
+  "cot": {
+    "binary_path_validity": 0.0735,
+    "edge_f1": 0.2255,
+    "mess": 0.2741,
+    "node_accuracy": 0.2741,
+    "n_diagnosis_scored": 68,
+    "final_diagnosis_accuracy": 0.0882
+  },
+  "report": {
+    "rouge_l": 0.0391,
+    "bleu4": 0.0391,
+    "clinical_token_f1": 0.0391,
+    "bert_score_f1": null,
+    "numeric_fidelity": 0.0418,
+    "negation_consistency": 0.2353
+  },
+  "binary_path_validity": 0.0735,
+  "edge_f1": 0.2255,
+  "node_accuracy": 0.2741,
+  "mess": 0.2741,
+  "rouge_l": 0.0391,
+  "bleu4": 0.0391,
+  "clinical_token_f1": 0.0391,
+  "note": "Seeded from cluster rescore 2026-08-01; overwrite via fetch_lora_v1_artifacts.sh",
+  "numeric_fidelity": 0.0418,
+  "negation_consistency": 0.2353,
+  "bert_score_f1": null,
+  "final_diagnosis_accuracy": 0.0882
+}

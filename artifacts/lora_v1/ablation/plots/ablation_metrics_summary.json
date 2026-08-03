@@ -1,0 +1,58 @@
+[
+  {
+    "arm": "a_base",
+    "binary_path_validity": 0.0441,
+    "final_diagnosis_accuracy": 0.4118,
+    "edge_f1": 0.2355,
+    "mess": 0.2467,
+    "node_accuracy": 0.2467,
+    "rouge_l": 0.0446,
+    "bleu4": 0.0446,
+    "clinical_token_f1": 0.0446,
+    "numeric_fidelity": 0.0,
+    "negation_consistency": 0.675,
+    "bert_score_f1": null
+  },
+  {
+    "arm": "a_lora",
+    "binary_path_validity": 0.2941,
+    "final_diagnosis_accuracy": 0.5441,
+    "edge_f1": 0.5081,
+    "mess": 0.5019,
+    "node_accuracy": 0.5019,
+    "rouge_l": 0.024,
+    "bleu4": 0.024,
+    "clinical_token_f1": 0.024,
+    "numeric_fidelity": 0.0,
+    "negation_consistency": 0.9091,
+    "bert_score_f1": null
+  },
+  {
+    "arm": "p0_base",
+    "binary_path_validity": 0.0735,
+    "final_diagnosis_accuracy": 0.0882,
+    "edge_f1": 0.2255,
+    "mess": 0.2741,
+    "node_accuracy": 0.2741,
+    "rouge_l": 0.0391,
+    "bleu4": 0.0391,
+    "clinical_token_f1": 0.0391,
+    "numeric_fidelity": 0.0418,
+    "negation_consistency": 0.2353,
+    "bert_score_f1": null
+  },
+  {
+    "arm": "p0_lora",
+    "binary_path_validity": 0.3382,
+    "final_diagnosis_accuracy": 0.5588,
+    "edge_f1": 0.531,
+    "mess": 0.511,
+    "node_accuracy": 0.511,
+    "rouge_l": 0.0163,
+    "bleu4": 0.0163,
+    "clinical_token_f1": 0.0163,
+    "numeric_fidelity": 0.0,
+    "negation_consistency": 1.0,
+    "bert_score_f1": null
+  }
+]

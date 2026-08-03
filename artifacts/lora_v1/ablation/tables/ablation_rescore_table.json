@@ -1,0 +1,38 @@
+[
+  {
+    "arm": "a_base",
+    "binary_path_validity": 0.0441,
+    "edge_f1": 0.2355,
+    "node_accuracy": 0.2467,
+    "diagnosis_label_accuracy": 0.4118,
+    "rouge_l": 0.0446,
+    "mess": 0.2467
+  },
+  {
+    "arm": "a_lora",
+    "binary_path_validity": 0.2941,
+    "edge_f1": 0.5081,
+    "node_accuracy": 0.5019,
+    "diagnosis_label_accuracy": 0.5441,
+    "rouge_l": 0.0240,
+    "mess": 0.5019
+  },
+  {
+    "arm": "p0_base",
+    "binary_path_validity": 0.0735,
+    "edge_f1": 0.2255,
+    "node_accuracy": 0.2741,
+    "diagnosis_label_accuracy": 0.0882,
+    "rouge_l": 0.0391,
+    "mess": 0.2741
+  },
+  {
+    "arm": "p0_lora",
+    "binary_path_validity": 0.3382,
+    "edge_f1": 0.5310,
+    "node_accuracy": 0.5110,
+    "diagnosis_label_accuracy": 0.5588,
+    "rouge_l": 0.0163,
+    "mess": 0.5110
+  }
+]
