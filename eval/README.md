@@ -15,7 +15,7 @@ Prediction JSONL format (one case per line):
 Metrics:
 
 - **CoT** (by default the trailing `report` node is excluded from path metrics): Binary Path
-  Validity, Edge-F1, MESS, node accuracy, 6-way diagnosis label accuracy
+  Validity, Edge-F1, MESS, node accuracy, final diagnosis accuracy (diagnosis-node exact match)
 - **Report:** ROUGE-L, BLEU-4, clinical proxy, optional BERTScore, numeric fidelity, negation
 
 ```bash

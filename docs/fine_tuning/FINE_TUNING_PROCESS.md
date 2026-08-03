@@ -140,7 +140,7 @@ path metrics; Final Diag Acc = exact `diagnosis` node key match). Scripts:
 | Edge-F1 | (node_id, normalized answer) set F1; report node excluded |
 | Node accuracy | Per-GT-node answer match rate |
 | MESS | Answer-text similarity (ST if available; else token overlap) |
-| Final diagnosis accuracy | Exact match of `diagnosis` node `answer_key` vs GT (graph keys; not Xun 6-way map) |
+| Final diagnosis accuracy | Exact match of `diagnosis` node `answer_key` vs GT |
 
 ### Report
 
@@ -190,3 +190,10 @@ CLUSTER_SSH_HOST=dogakonuk@head.garching.camp.cluster \
 | Image encode fix | `vision/vlm_messages.py` |
 
 ---
+
+## 11. Limits / honesty for the report
+
+- No val loss → cannot plot train vs val; argue generalization from **test** node + agent metrics.
+- Report quality not a training objective → low / flat ROUGE is expected.
+- Final Diag Acc is exact `diagnosis` node key match vs GT (rescore after pulling metric changes).
+- Adapter weights stay on cluster NFS; git holds metrics and docs only.
