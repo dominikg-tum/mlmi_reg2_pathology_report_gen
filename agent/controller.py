@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent.answers import normalize_answer
 from agent.backends import AnswerBackend
@@ -51,6 +51,7 @@ def traverse(
     structured_answer: bool = False,
     paired_regions: bool = False,
     react_max_iters: int | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[Step]:
     graph = graph or GRAPH
     root_id = root_id or ROOT_ID
@@ -141,6 +142,15 @@ def traverse(
                         "patches": patches_meta,
                     }
                 )
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "event": "node_started",
+                    "node_id": node.id,
+                    "question": node.question,
+                    "steps": list(steps),
+                }
+            )
         extra = mem.retrieve_context(node, query)
         semantic_extra = mem.semantic_context(node, query)
         answer = ""
@@ -259,19 +269,33 @@ def traverse(
         if next_id is not None:
             next_q = store.get_node(next_id).question
 
-        steps.append(
-            Step(
-                node.id,
-                node.question,
-                answer,
-                confidence,
-                next_question=next_q,
-                node_traces=node_traces,
-                answer_branch=answer_branch,
-                answer_branch_skip_reason=answer_branch_skip_reason,
-            )
+        step = Step(
+            node.id,
+            node.question,
+            answer,
+            confidence,
+            next_question=next_q,
+            raw_answer=last_raw,
+            node_traces=node_traces,
+            answer_branch=answer_branch,
+            answer_branch_skip_reason=answer_branch_skip_reason,
         )
+        steps.append(step)
         mem.append(node.id, node.question, answer)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "event": "node_finished",
+                    "node_id": node.id,
+                    "question": node.question,
+                    "answer": answer,
+                    "confidence": confidence,
+                    "raw_answer": last_raw,
+                    "next_node_id": next_id,
+                    "next_question": next_q,
+                    "steps": list(steps),
+                }
+            )
 
         if next_id is None:
             break
@@ -301,6 +325,8 @@ def chain_to_dict(
                 "node_id": s.node_id,
                 "question": s.question,
                 "answer": s.answer,
+                "confidence": s.confidence,
+                "raw_answer": s.raw_answer,
                 "next_question": s.next_question,
                 "node_traces": s.node_traces,
                 "answer_branch": s.answer_branch,

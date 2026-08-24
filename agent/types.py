@@ -12,6 +12,7 @@ class Step:
     answer: str
     confidence: float
     next_question: str = ""
+    raw_answer: str = ""
     node_traces: list[dict[str, Any]] = field(default_factory=list)
     # Which answer path produced this step: react | structured | plain.
     answer_branch: str = ""

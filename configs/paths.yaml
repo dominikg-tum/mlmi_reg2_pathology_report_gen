@@ -2,7 +2,7 @@
 
 cluster:
   project_root: /mnt/projects/mlmi/reg2
-  data_dir: /mnt/projects/mlmi/TUMUntera/TUM_Untera_data
+  data_dir: /mnt/research/data_slow/miccai_challenge/slides_with_public_id_final
   labels_xlsx: /mnt/projects/mlmi/reg2/case_reports_to_korea_collaborators.xlsx
   # Repo-relative UUID ↔ TUM_Uterus_XXXX map (built from data/TUM_Uterus_name_mapping.xlsx)
   name_map_csv: data/manifests/wsi_name_map.csv
@@ -40,6 +40,7 @@ repo:
 
 # Deployed under cluster.models_dir (ls models/)
 models:
+  qwen2_5_vl_7b: /mnt/research/ljs/vlm_malignancy/Qwen2.5-VL-7B-Instruct
   qwen3_vl_8b: /mnt/projects/mlmi/reg2/models/Qwen3-VL-8B-Instruct
   qwen3_vl_30b: /mnt/projects/mlmi/reg2/models/Qwen3-VL-30B-A3B-Instruct
   internvl3_5_8b: /mnt/projects/mlmi/reg2/models/InternVL3_5-8B
@@ -49,10 +50,10 @@ models:
   titan: MahmoodLab/TITAN
 
 qwen:
-  model_path: /mnt/projects/mlmi/reg2/models/Qwen3-VL-8B-Instruct
+  model_path: /mnt/research/ljs/vlm_malignancy/Qwen2.5-VL-7B-Instruct
   api_base_url: http://localhost:8000/v1
   api_key: token-abc123
-  model_name: Qwen3-VL-8B-Instruct
+  model_name: /mnt/research/ljs/vlm_malignancy/Qwen2.5-VL-7B-Instruct
 
 # Phase-1 LoRA node answerer (training/lora.py). Owner: DOGA. base_model is the
 # shared frozen backbone; adapter_dir holds the trained LoRA (small, ~100s MB);

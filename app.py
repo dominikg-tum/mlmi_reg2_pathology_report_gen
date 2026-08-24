@@ -42,13 +42,133 @@ def chain_without_report(chain: dict) -> list[dict]:
     return [step for step in steps if step.get("node_id") != "report"]
 
 
+def _step_to_dict(step) -> dict:
+    if isinstance(step, dict):
+        return dict(step)
+    return {
+        "node_id": getattr(step, "node_id", ""),
+        "question": getattr(step, "question", ""),
+        "answer": getattr(step, "answer", ""),
+        "confidence": getattr(step, "confidence", 0.0),
+        "raw_answer": getattr(step, "raw_answer", ""),
+        "next_question": getattr(step, "next_question", ""),
+    }
+
+
+def chain_from_steps(
+    steps,
+    *,
+    slide_id: str = "",
+    include_report: bool = True,
+) -> dict:
+    step_dicts = [_step_to_dict(step) for step in steps]
+    report = ""
+    if include_report and step_dicts and step_dicts[-1].get("node_id") == "report":
+        report = str(step_dicts[-1].get("answer", ""))
+    return {
+        "slide_id": slide_id,
+        "chain-of-thought": step_dicts,
+        "node_path": [str(step.get("node_id", "")) for step in step_dicts],
+        "report": report,
+    }
+
+
+def _dot_escape(value: object) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _shorten(value: object, limit: int = 120) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
+
+
+def reasoning_graph_dot(
+    chain: dict,
+    *,
+    active_node_id: str = "",
+    active_question: str = "",
+) -> str:
+    steps = chain.get("chain-of-thought") or []
+    lines = [
+        "digraph reasoning_path {",
+        '  graph [rankdir=TB, bgcolor="transparent", pad="0.2", nodesep="0.35", ranksep="0.45"];',
+        '  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, margin="0.12,0.08"];',
+        '  edge [color="#64748b", penwidth=1.6, arrowsize=0.8];',
+    ]
+    previous = ""
+    for index, step in enumerate(steps):
+        node_name = f"n{index}"
+        is_report = step.get("node_id") == "report"
+        fill = "#ecfdf5" if not is_report else "#eff6ff"
+        border = "#15803d" if not is_report else "#1d4ed8"
+        label = (
+            f"{index + 1}. {step.get('node_id', '')}\\n"
+            f"Q: {_shorten(step.get('question', ''), 96)}\\n"
+            f"A: {_shorten(step.get('answer', ''), 96)}"
+        )
+        lines.append(
+            f'  {node_name} [label="{_dot_escape(label)}", fillcolor="{fill}", color="{border}"];'
+        )
+        if previous:
+            lines.append(f"  {previous} -> {node_name};")
+        previous = node_name
+
+    if active_node_id:
+        active_name = f"n{len(steps)}_active"
+        label = f"Running: {active_node_id}\\nQ: {_shorten(active_question, 120)}"
+        lines.append(
+            f'  {active_name} [label="{_dot_escape(label)}", fillcolor="#fff7ed", color="#ea580c", penwidth=2.2];'
+        )
+        if previous:
+            lines.append(f"  {previous} -> {active_name};")
+
+    if not steps and not active_node_id:
+        lines.append(
+            '  empty [label="Waiting for the diagnostic chain to start", fillcolor="#f8fafc", color="#94a3b8"];'
+        )
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def render_reasoning_graph(
+    st,
+    chain: dict,
+    *,
+    active_node_id: str = "",
+    active_question: str = "",
+) -> None:
+    st.graphviz_chart(
+        reasoning_graph_dot(
+            chain,
+            active_node_id=active_node_id,
+            active_question=active_question,
+        ),
+        use_container_width=True,
+    )
+
+
 def render_chain(st, chain: dict) -> None:
     steps = chain_without_report(chain)
     columns = st.columns(2)
     for index, step in enumerate(steps):
         question = html.escape(str(step.get("question", "")))
         answer = html.escape(str(step.get("answer", "")))
+        raw_answer = str(step.get("raw_answer", "") or "").strip()
+        confidence = step.get("confidence")
         node_id = html.escape(str(step.get("node_id", "")))
+        details = []
+        if confidence is not None:
+            try:
+                details.append(f"confidence {float(confidence):.2f}")
+            except (TypeError, ValueError):
+                pass
+        if raw_answer and raw_answer != step.get("answer"):
+            details.append(f"raw: {html.escape(raw_answer)}")
+        detail_html = (
+            f'<div class="node-id">{" | ".join(details)}</div>' if details else ""
+        )
         with columns[index % 2]:
             st.markdown(
                 f"""
@@ -62,6 +182,7 @@ def render_chain(st, chain: dict) -> None:
                     <div class="qa-text">{answer}</div>
                   </div>
                   <div class="node-id">{node_id}</div>
+                  {detail_html}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -177,12 +298,41 @@ def main() -> None:
                 uploaded.name,
                 UPLOADS_DIR,
             )
-            with st.spinner("Following the diagnostic graph..."):
+            live_status = st.empty()
+            live_graph = st.empty()
+
+            def update_live_graph(event: dict) -> None:
+                partial_chain = chain_from_steps(
+                    event.get("steps", []),
+                    slide_id=safe_upload_name(uploaded.name),
+                    include_report=True,
+                )
+                active_node_id = ""
+                active_question = ""
+                if event.get("event") == "node_started":
+                    active_node_id = str(event.get("node_id", ""))
+                    active_question = str(event.get("question", ""))
+                    live_status.info(f"Running reasoning step: {active_node_id}")
+                elif event.get("event") == "node_finished":
+                    live_status.success(
+                        f"Finished reasoning step: {event.get('node_id', '')}"
+                    )
+                with live_graph.container():
+                    st.subheader("Live reasoning graph")
+                    render_reasoning_graph(
+                        st,
+                        partial_chain,
+                        active_node_id=active_node_id,
+                        active_question=active_question,
+                    )
+
+            with st.spinner("Following the diagnostic graph with the selected VLM..."):
                 if mode == "Dummy smoke test":
                     chain = run_fixed_image_chain(
                         image_path,
                         backend=DummyBackend(),
                         image_id=safe_upload_name(uploaded.name),
+                        progress_callback=update_live_graph,
                     )
                 else:
                     chain = run_remote_image_chain(
@@ -190,12 +340,14 @@ def main() -> None:
                         base_url=endpoint,
                         model_name=model_name,
                         api_key=api_key,
+                        progress_callback=update_live_graph,
                     )
                 output_path = save_baseline_result(
                     chain,
                     output_root=RUNS_DIR,
                     image_name=uploaded.name,
                 )
+            live_status.success("Diagnostic graph run complete")
             st.session_state["baseline_chain"] = chain
             st.session_state["baseline_image"] = safe_upload_name(uploaded.name)
             st.session_state["baseline_output"] = str(output_path)
@@ -212,8 +364,6 @@ def main() -> None:
         return
 
     st.divider()
-    st.subheader("Diagnostic reasoning chain")
-    render_chain(st, chain)
 
     st.subheader("Final pathology report")
     report = html.escape(str(chain.get("report", ""))).replace("\n", "<br>")
@@ -221,6 +371,12 @@ def main() -> None:
         f'<div class="report-box">{report or "No report was generated."}</div>',
         unsafe_allow_html=True,
     )
+
+    st.subheader("Final reasoning path")
+    render_reasoning_graph(st, chain)
+
+    st.subheader("Step outputs")
+    render_chain(st, chain)
     st.caption(f"Saved to {st.session_state.get('baseline_output', '')}")
 
     with st.expander("Raw chain JSON"):

@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from agent.backends import AnswerBackend, ZeroShotQwenBackend
 from agent.controller import chain_to_dict, traverse
@@ -53,6 +53,7 @@ def run_fixed_image_chain(
     *,
     backend: AnswerBackend,
     image_id: str | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full graph with one uploaded image attached to every VLM question."""
     visual = VisualBundle(
@@ -66,6 +67,7 @@ def run_fixed_image_chain(
         visual_method="none",
         fixed_visual_bundle=visual,
         skip_report_nodes=False,
+        progress_callback=progress_callback,
     )
     return chain_to_dict(
         steps,
@@ -80,6 +82,7 @@ def run_remote_image_chain(
     base_url: str,
     model_name: str,
     api_key: str = "EMPTY",
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     import openai
 
@@ -89,6 +92,7 @@ def run_remote_image_chain(
         image_path,
         backend=backend,
         image_id=image_path.name,
+        progress_callback=progress_callback,
     )
 
 

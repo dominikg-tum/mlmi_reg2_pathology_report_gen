@@ -16,6 +16,10 @@ SYSTEM_PROMPT = (
 )
 
 MAX_WALK_STEPS = 64
+ROOT_FALLBACKS = {
+    "organ_procedure": "uterus_curettage",
+    "compartment": "endometrium",
+}
 
 
 class GraphWalkError(Exception):
@@ -82,6 +86,9 @@ def extract_node_answer(
     answer = normalize_answer(raw, node)
     if answer is not None:
         return answer
+    fallback = fallback_answer(raw, node)
+    if fallback is not None:
+        return fallback
 
     if retry:
         retry_suffix = (
@@ -92,10 +99,26 @@ def extract_node_answer(
         answer = normalize_answer(raw, node)
         if answer is not None:
             return answer
+        fallback = fallback_answer(raw, node)
+        if fallback is not None:
+            return fallback
 
     raise GraphWalkError(
         f"Invalid answer for node {node.id!r}: {raw!r}; valid options: {node.options}"
     )
+
+
+def fallback_answer(raw: str, node: Node) -> str | None:
+    """Map unsupported abstentions to graph-compatible conservative answers."""
+    if (raw or "").strip().lower().strip("`\"' \t\r\n.,;") != "not_mentioned":
+        return None
+    for option in ("unsure", "none_of_above", "not_mentioned"):
+        if option in node.options:
+            return option
+    fallback = ROOT_FALLBACKS.get(node.id)
+    if fallback in node.options:
+        return fallback
+    return None
 
 
 def walk_graph(

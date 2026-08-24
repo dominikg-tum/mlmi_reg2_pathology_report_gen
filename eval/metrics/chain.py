@@ -41,6 +41,16 @@ def edge_f1(pred: CaseRecord, gt: CaseRecord) -> dict[str, float]:
     return {"precision": prec, "recall": rec, "f1": f1}
 
 
+def node_accuracy(pred: CaseRecord, gt: CaseRecord) -> float:
+    """Mean exact answer accuracy over GT nodes that also appear in prediction."""
+    gt_by_node = {s.node_id or s.question: s.answer.strip().lower() for s in gt.chain}
+    pred_by_node = {s.node_id or s.question: s.answer.strip().lower() for s in pred.chain}
+    if not gt_by_node:
+        return 0.0
+    correct = sum(1 for key, answer in gt_by_node.items() if pred_by_node.get(key) == answer)
+    return correct / len(gt_by_node)
+
+
 def mess_score(pred: CaseRecord, gt: CaseRecord) -> float:
     """Semantic similarity of answers; uses sentence-transformers if available."""
     pred_text = " ".join(s.answer for s in pred.chain)
